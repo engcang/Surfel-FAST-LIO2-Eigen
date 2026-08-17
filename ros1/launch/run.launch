@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<launch>
+    <arg name="config_file" default="$(find surfel_fast_lio2_eigen)/config/avia.yaml" />
+    <arg name="rviz" default="false" />
+
+    <!-- run -->
+    <node pkg="surfel_fast_lio2_eigen"
+          type="surfel_fast_lio2_eigen_mapping"
+          name="laser_mapping"
+          output="screen">
+        <rosparam command="load" file="$(arg config_file)" />
+    </node>
+
+    <!-- visualize -->
+    <group if="$(arg rviz)">
+        <node pkg="rviz"
+              type="rviz"
+              name="rviz"
+              args="-d $(find surfel_fast_lio2_eigen)/rviz_cfg/loam_livox.rviz" />
+    </group>
+</launch>
