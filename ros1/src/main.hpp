@@ -1,80 +1,50 @@
-// This is an advanced implementation of the algorithm described in the
-// following paper:
-//   J. Zhang and S. Singh. LOAM: Lidar Odometry and Mapping in Real-time.
-//     Robotics: Science and Systems Conference (RSS). Berkeley, CA, July 2014.
-
-// Modifier: Livox               dev@livoxtech.com
-
-// Copyright 2013, Ji Zhang, Carnegie Mellon University
-// Further contributions copyright (c) 2016, Southwest Research Institute
-// All rights reserved.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met:
-//
-// 1. Redistributions of source code must retain the above copyright notice,
-//    this list of conditions and the following disclaimer.
-// 2. Redistributions in binary form must reproduce the above copyright notice,
-//    this list of conditions and the following disclaimer in the documentation
-//    and/or other materials provided with the distribution.
-// 3. Neither the name of the copyright holder nor the names of its
-//    contributors may be used to endorse or promote products derived from this
-//    software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-// POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
 #include <algorithm>
 #include <csignal>
+#include <cmath>
 #include <cstdio>
 #include <deque>
-#include <math.h>
 #include <memory>
 #include <string>
 #include <type_traits>
 #include <vector>
-#include <so3_math.hpp>
-#include <ros/ros.h>
+
 #include <Eigen/Core>
-#include "imu_processing.hpp"
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <tbb/blocked_range.h>
+#include <tbb/parallel_for.h>
+
+#include <geometry_msgs/TransformStamped.h>
+#include <livox_ros_driver/CustomMsg.h>
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
 #include <pcl_conversions/pcl_conversions.h>
-#include <pcl/point_cloud.h>
-#include <pcl/point_types.h>
-#include <pcl/filters/voxel_grid.h>
-#include <sensor_msgs/PointCloud2.h>
+#include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
-#include <geometry_msgs/TransformStamped.h>
+#include <sensor_msgs/PointCloud2.h>
 #include <tf2_ros/transform_broadcaster.h>
-#include <livox_ros_driver/CustomMsg.h>
-#include <tbb/blocked_range.h>
-#include <tbb/parallel_for.h>
+
+#include "eigen_lie.hpp"
+#include "imu_processing.hpp"
 #include "ros_converter.hpp"
+#include "runtime_profiler.hpp"
 #include "surfel_voxel_map.hpp"
 #include "tbb_surfel_voxel_map.hpp"
 
 #define LASER_POINT_COV (0.001)
 
-class SurfelLioApplication
+class SurfelFastLioApplication
 {
 public:
-    SurfelLioApplication()
+    SurfelFastLioApplication()
     {
         active_application_ = this;
     }
 
-    ~SurfelLioApplication()
+    ~SurfelFastLioApplication()
     {
         if (active_application_ == this)
         {
@@ -83,6 +53,16 @@ public:
     }
 
 private:
+    inline static SurfelFastLioApplication *active_application_ = nullptr;
+    inline static volatile std::sig_atomic_t exit_requested_ = 0;
+
+    template<bool UseConcurrentHashMap>
+    static void measurementJacobianCallback(LioState &_state,
+                                            DynamicSharedData &_measurement_data)
+    {
+        active_application_->buildMeasurementModelJacobianMatrix<UseConcurrentHashMap>(_state, _measurement_data);
+    }
+
     template<typename T>
     T parameter(ros::NodeHandle &_node,
                 const std::string &_name,
@@ -95,7 +75,6 @@ private:
         return value;
     }
 
-
     bool path_enabled_ = true;
 
     std::string lidar_topic_, imu_topic_;
@@ -106,10 +85,13 @@ private:
     double gyroscope_covariance_ = 0.1, accelerometer_covariance_ = 0.1, gyroscope_bias_covariance_ = 0.0001, accelerometer_bias_covariance_ = 0.0001;
     double voxel_resolution_ = 0;
     double local_map_box_size_ = 0, lidar_end_time_ = 0;
+    double lidar_mean_scantime_ = 0.0;
+    int count_lidar_scan_ = 0;
     int num_effective_points_ = 0;
     int num_voxel_points_ = 0, maximum_iterations_ = 0;
     bool point_has_valid_surfel_[100000]{};
     bool lidar_pushed_ = false;
+    bool first_synchronized_measurement_ = true;
     bool scan_publish_enabled_ = false, dense_publish_enabled_ = false, body_scan_publish_enabled_ = false;
     int lidar_type_ = LIVOX;
 
@@ -131,12 +113,12 @@ private:
 
     /*** EKF inputs and output ***/
     MeasureGroup measurements_;
-    IterativeErrorStateKalmanFilter esikf_;
+    RuntimeProfiler runtime_profiler_;
+    ErrorStateIterativeKalmanFilter esikf_;
     LioState esikf_state_;
 
     nav_msgs::Path lio_path_;
     nav_msgs::Odometry mapped_odometry_;
-    geometry_msgs::Quaternion orientation_message_;
     geometry_msgs::PoseStamped body_pose_message_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> transform_broadcaster_;
 
@@ -260,14 +242,12 @@ private:
         const double timestamp = stampToSeconds(_msg_in->header.stamp);
         ImuSample sample;
         sample.timestamp_ = timestamp;
-        sample.linear_acceleration_ = {
-            _msg_in->linear_acceleration.x,
-            _msg_in->linear_acceleration.y,
-            _msg_in->linear_acceleration.z};
-        sample.angular_velocity_ = {
-            _msg_in->angular_velocity.x,
-            _msg_in->angular_velocity.y,
-            _msg_in->angular_velocity.z};
+        sample.linear_acceleration_ = {_msg_in->linear_acceleration.x,
+                                       _msg_in->linear_acceleration.y,
+                                       _msg_in->linear_acceleration.z};
+        sample.angular_velocity_ = {_msg_in->angular_velocity.x,
+                                    _msg_in->angular_velocity.y,
+                                    _msg_in->angular_velocity.z};
 
         if (timestamp < last_timestamp_imu_)
         {
@@ -280,8 +260,6 @@ private:
         imu_buffer_.push_back(sample);
     }
 
-    double lidar_mean_scantime_ = 0.0;
-    int count_lidar_scan_ = 0;
     bool synchronizeMeasurements(MeasureGroup &_meas)
     {
         if (lidar_buffer_.empty() || imu_buffer_.empty())
@@ -348,15 +326,14 @@ private:
         auto &surfel_map = activeSurfelMap<UseConcurrentHashMap>();
         points_voxel_world_->resize(num_voxel_points_);
         //clang-format off
-        tbb::parallel_for(
-            tbb::blocked_range<int>(0, num_voxel_points_),
-            [this](const tbb::blocked_range<int> &_range)
-            {
-                for (int index = _range.begin(); index != _range.end(); ++index)
-                {
-                    pointLidarToWorld(&points_voxel_lidar_->points[index], &points_voxel_world_->points[index]);
-                }
-            });
+        tbb::parallel_for(tbb::blocked_range<int>(0, num_voxel_points_),
+                          [this](const tbb::blocked_range<int> &_range)
+                          {
+                              for (int index = _range.begin(); index != _range.end(); ++index)
+                              {
+                                  pointLidarToWorld(&points_voxel_lidar_->points[index], &points_voxel_world_->points[index]);
+                              }
+                          });
         //clang-format on
 
         surfel_map.update(*points_voxel_world_, esikf_state_.position_);
@@ -368,8 +345,7 @@ private:
         {
             LidarPointCloud::Ptr laser_cloud_full_res(dense_publish_enabled_ ? points_undistorted_lidar_ : points_voxel_lidar_);
             int size = laser_cloud_full_res->points.size();
-            LidarPointCloud::Ptr laser_cloud_world(
-                new LidarPointCloud(size, 1));
+            LidarPointCloud::Ptr laser_cloud_world(new LidarPointCloud(size, 1));
 
             for (int i = 0; i < size; i++)
             {
@@ -409,10 +385,10 @@ private:
         _out.pose.position.x = esikf_state_.position_(0);
         _out.pose.position.y = esikf_state_.position_(1);
         _out.pose.position.z = esikf_state_.position_(2);
-        _out.pose.orientation.x = orientation_message_.x;
-        _out.pose.orientation.y = orientation_message_.y;
-        _out.pose.orientation.z = orientation_message_.z;
-        _out.pose.orientation.w = orientation_message_.w;
+        _out.pose.orientation.x = esikf_state_.rotation_.x();
+        _out.pose.orientation.y = esikf_state_.rotation_.y();
+        _out.pose.orientation.z = esikf_state_.rotation_.z();
+        _out.pose.orientation.w = esikf_state_.rotation_.w();
     }
 
     void publishOdometry(const ros::Publisher &_pub_odom_aft_mapped)
@@ -421,18 +397,15 @@ private:
         mapped_odometry_.child_frame_id = "body";
         mapped_odometry_.header.stamp = secondsToStamp(lidar_end_time_);
         setPoseStamp(mapped_odometry_.pose);
-        _pub_odom_aft_mapped.publish(mapped_odometry_);
         const auto &p = esikf_.getCovariance();
-        for (int i = 0; i < 6; i++)
+        for (int row = 0; row < 6; ++row)
         {
-            int k = i < 3 ? i + 3 : i - 3;
-            mapped_odometry_.pose.covariance[i * 6 + 0] = p(k, 3);
-            mapped_odometry_.pose.covariance[i * 6 + 1] = p(k, 4);
-            mapped_odometry_.pose.covariance[i * 6 + 2] = p(k, 5);
-            mapped_odometry_.pose.covariance[i * 6 + 3] = p(k, 0);
-            mapped_odometry_.pose.covariance[i * 6 + 4] = p(k, 1);
-            mapped_odometry_.pose.covariance[i * 6 + 5] = p(k, 2);
+            for (int column = 0; column < 6; ++column)
+            {
+                mapped_odometry_.pose.covariance[row * 6 + column] = p(row, column);
+            }
         }
+        _pub_odom_aft_mapped.publish(mapped_odometry_);
 
         geometry_msgs::TransformStamped transform;
         transform.header = mapped_odometry_.header;
@@ -483,52 +456,49 @@ private:
         points_voxel_lidar_effective_->clear();
         point_normal_vectors_effective_->clear();
 
-        //Codex: Use direct O(1) surfel lookup for residual computation.
+        //Use direct O(1) surfel lookup for residual computation.
         //clang-format off
-        tbb::parallel_for(
-            tbb::blocked_range<int>(0, num_voxel_points_),
-            [this, &_s, &surfel_map, &lidar_to_imu_translation, &lidar_to_imu_rotation](const tbb::blocked_range<int> &_range)
-            {
-                for (int index = _range.begin(); index != _range.end(); ++index)
-                {
-                    const LidarPoint &point_body = points_voxel_lidar_->points[index];
-                    LidarPoint &point_world = points_voxel_world_->points[index];
-                    const Eigen::Vector3d point_lidar(point_body.x, point_body.y, point_body.z);
-                    const Eigen::Vector3d point_global = _s.rotation_ *
-                                                             (lidar_to_imu_rotation * point_lidar + lidar_to_imu_translation) +
-                                                         _s.position_;
-                    point_world.x = point_global.x();
-                    point_world.y = point_global.y();
-                    point_world.z = point_global.z();
-                    point_world.intensity = point_body.intensity;
-                    point_has_valid_surfel_[index] = false;
+        tbb::parallel_for(tbb::blocked_range<int>(0, num_voxel_points_),
+                          [this, &_s, &surfel_map, &lidar_to_imu_translation, &lidar_to_imu_rotation](const tbb::blocked_range<int> &_range)
+                          {
+                              for (int index = _range.begin(); index != _range.end(); ++index)
+                              {
+                                  const LidarPoint &point_body = points_voxel_lidar_->points[index];
+                                  LidarPoint &point_world = points_voxel_world_->points[index];
+                                  const Eigen::Vector3d point_lidar(point_body.x, point_body.y, point_body.z);
+                                  const Eigen::Vector3d point_global = _s.rotation_ *
+                                                                           (lidar_to_imu_rotation * point_lidar + lidar_to_imu_translation) +
+                                                                       _s.position_;
+                                  point_world.x = point_global.x();
+                                  point_world.y = point_global.y();
+                                  point_world.z = point_global.z();
+                                  point_world.intensity = point_body.intensity;
+                                  point_has_valid_surfel_[index] = false;
 
-                    using SurfelType = std::conditional_t<UseConcurrentHashMap,
-                                                          TbbSurfel,
-                                                          Surfel>;
-                    SurfelType surfel;
-                    if (!surfel_map.findSurfel(point_global, surfel))
-                    {
-                        continue;
-                    }
+                                  using SurfelType = std::conditional_t<UseConcurrentHashMap,
+                                                                        TbbSurfel,
+                                                                        Surfel>;
+                                  SurfelType surfel;
+                                  if (!surfel_map.findSurfel(point_global, surfel))
+                                  {
+                                      continue;
+                                  }
 
-                    const float distance = surfel.normal_.dot(
-                        point_global.cast<float>() - surfel.centroid_);
-                    const float range_scale = std::sqrt(
-                        std::max(static_cast<float>(point_lidar.norm()), 1.0e-6F));
-                    const float score = 1.0F - 0.9F * std::abs(distance) / range_scale;
-                    if (score <= 0.9F)
-                    {
-                        continue;
-                    }
+                                  const float distance = surfel.normal_.dot(point_global.cast<float>() - surfel.centroid_);
+                                  const float range_scale = std::sqrt(std::max(static_cast<float>(point_lidar.norm()), 1.0e-6F));
+                                  const float score = 1.0F - 0.9F * std::abs(distance) / range_scale;
+                                  if (score <= 0.9F)
+                                  {
+                                      continue;
+                                  }
 
-                    point_has_valid_surfel_[index] = true;
-                    point_normal_vectors_->points[index].x = surfel.normal_.x();
-                    point_normal_vectors_->points[index].y = surfel.normal_.y();
-                    point_normal_vectors_->points[index].z = surfel.normal_.z();
-                    point_normal_vectors_->points[index].intensity = distance;
-                }
-            });
+                                  point_has_valid_surfel_[index] = true;
+                                  point_normal_vectors_->points[index].x = surfel.normal_.x();
+                                  point_normal_vectors_->points[index].y = surfel.normal_.y();
+                                  point_normal_vectors_->points[index].z = surfel.normal_.z();
+                                  point_normal_vectors_->points[index].intensity = distance;
+                              }
+                          });
         //clang-format on
 
         num_effective_points_ = 0;
@@ -555,25 +525,24 @@ private:
         _measurement_data.residual_.resize(num_effective_points_);
 
         //clang-format off
-        tbb::parallel_for(
-            tbb::blocked_range<int>(0, num_effective_points_),
-            [this, &_s, &_measurement_data, &lidar_to_imu_translation, &lidar_to_imu_rotation](const tbb::blocked_range<int> &_range)
-            {
-                for (int index = _range.begin(); index != _range.end(); ++index)
-                {
-                    const LidarPoint &laser_point = points_voxel_lidar_effective_->points[index];
-                    const Eigen::Vector3d point_lidar(laser_point.x, laser_point.y, laser_point.z);
-                    const Eigen::Vector3d point_imu = lidar_to_imu_rotation * point_lidar + lidar_to_imu_translation;
-                    const Eigen::Matrix3d point_imu_cross = skewSymMat(point_imu);
+        tbb::parallel_for(tbb::blocked_range<int>(0, num_effective_points_),
+                          [this, &_s, &_measurement_data, &lidar_to_imu_translation, &lidar_to_imu_rotation](const tbb::blocked_range<int> &_range)
+                          {
+                              for (int index = _range.begin(); index != _range.end(); ++index)
+                              {
+                                  const LidarPoint &laser_point = points_voxel_lidar_effective_->points[index];
+                                  const Eigen::Vector3d point_lidar(laser_point.x, laser_point.y, laser_point.z);
+                                  const Eigen::Vector3d point_imu = lidar_to_imu_rotation * point_lidar + lidar_to_imu_translation;
+                                  const Eigen::Matrix3d point_imu_cross = lie::hat(point_imu);
 
-                    const LidarPoint &normal_point = point_normal_vectors_effective_->points[index];
-                    const Eigen::Vector3d normal(normal_point.x, normal_point.y, normal_point.z);
-                    const Eigen::Vector3d rotated_normal = _s.rotation_.conjugate() * normal;
-                    const Eigen::Vector3d rotation_jacobian = point_imu_cross * rotated_normal;
-                    _measurement_data.jacobian_.block<1, kMeasurementStateDim>(index, 0) << normal.transpose(), rotation_jacobian.transpose();
-                    _measurement_data.residual_(index) = -normal_point.intensity;
-                }
-            });
+                                  const LidarPoint &normal_point = point_normal_vectors_effective_->points[index];
+                                  const Eigen::Vector3d normal(normal_point.x, normal_point.y, normal_point.z);
+                                  const Eigen::Vector3d rotated_normal = _s.rotation_.conjugate() * normal;
+                                  const Eigen::Vector3d rotation_jacobian = point_imu_cross * rotated_normal;
+                                  _measurement_data.jacobian_.block<1, kMeasurementStateDim>(index, 0) << normal.transpose(), rotation_jacobian.transpose();
+                                  _measurement_data.residual_(index) = -normal_point.intensity;
+                              }
+                          });
         //clang-format on
     }
 
@@ -594,6 +563,9 @@ public:
         scan_publish_enabled_ = parameter<bool>(private_node, "publish.scan_publish_en", true);
         dense_publish_enabled_ = parameter<bool>(private_node, "publish.dense_publish_en", true);
         body_scan_publish_enabled_ = parameter<bool>(private_node, "publish.scan_bodyframe_pub_en", true);
+        const bool runtime_enabled = parameter<bool>(private_node, "runtime.enabled", false);
+        const std::string runtime_output_path = parameter<std::string>(private_node, "runtime.output_path", "runtime.csv");
+        runtime_profiler_.configure(runtime_enabled, runtime_output_path);
         maximum_iterations_ = parameter<int>(private_node, "filter.maximum_iterations", 4);
         lidar_topic_ = parameter<std::string>(private_node, "common.lidar_topic", "/livox/lidar");
         imu_topic_ = parameter<std::string>(private_node, "common.imu_topic", "/livox/imu");
@@ -622,28 +594,43 @@ public:
             return 1;
         }
         use_concurrent_hash_map_ = parameter<bool>(private_node, "surfel.use_concurrent_hash_map", false);
-        const float surfel_leaf_voxel_size = static_cast<float>(
-            parameter<double>(private_node, "surfel.leaf_voxel_size", voxel_resolution_));
+        const float surfel_leaf_voxel_size = static_cast<float>(parameter<double>(private_node,
+                                                                                  "surfel.leaf_voxel_size",
+                                                                                  voxel_resolution_));
         const float surfel_map_half_extent = static_cast<float>(local_map_box_size_ * 0.5);
-        const float surfel_recenter_distance = static_cast<float>(
-            parameter<double>(private_node, "surfel.recenter_distance", local_map_box_size_ * 0.25));
-        const float surfel_maximum_flatness = static_cast<float>(
-            parameter<double>(private_node, "surfel.maximum_flatness", 0.03));
-        const float surfel_minimum_linearity = static_cast<float>(
-            parameter<double>(private_node, "surfel.minimum_linearity", 0.3));
-        const std::size_t surfel_minimum_occupied_leaf_count = static_cast<std::size_t>(
-            parameter<int>(private_node, "surfel.minimum_occupied_leaf_count", 5));
+        const float surfel_recenter_distance = static_cast<float>(parameter<double>(private_node,
+                                                                                    "surfel.recenter_distance",
+                                                                                    local_map_box_size_ * 0.25));
+        const float surfel_maximum_flatness = static_cast<float>(parameter<double>(private_node,
+                                                                                   "surfel.maximum_flatness",
+                                                                                   0.03));
+        const float surfel_minimum_linearity = static_cast<float>(parameter<double>(private_node,
+                                                                                    "surfel.minimum_linearity",
+                                                                                    0.3));
+        const std::size_t surfel_minimum_occupied_leaf_count = static_cast<std::size_t>(parameter<int>(private_node,
+                                                                                                       "surfel.minimum_occupied_leaf_count",
+                                                                                                       5));
         if (use_concurrent_hash_map_)
         {
             tbb_surfel_map_ = std::make_unique<TbbSurfelVoxelMap>();
-            configureSurfelMap(
-                *tbb_surfel_map_, surfel_leaf_voxel_size, surfel_map_half_extent, surfel_recenter_distance, surfel_maximum_flatness, surfel_minimum_linearity, surfel_minimum_occupied_leaf_count);
+            configureSurfelMap(*tbb_surfel_map_,
+                               surfel_leaf_voxel_size,
+                               surfel_map_half_extent,
+                               surfel_recenter_distance,
+                               surfel_maximum_flatness,
+                               surfel_minimum_linearity,
+                               surfel_minimum_occupied_leaf_count);
         }
         else
         {
             dense_surfel_map_ = std::make_unique<SurfelVoxelMap>();
-            configureSurfelMap(
-                *dense_surfel_map_, surfel_leaf_voxel_size, surfel_map_half_extent, surfel_recenter_distance, surfel_maximum_flatness, surfel_minimum_linearity, surfel_minimum_occupied_leaf_count);
+            configureSurfelMap(*dense_surfel_map_,
+                               surfel_leaf_voxel_size,
+                               surfel_map_half_extent,
+                               surfel_recenter_distance,
+                               surfel_maximum_flatness,
+                               surfel_minimum_linearity,
+                               surfel_minimum_occupied_leaf_count);
         }
         ROS_INFO("Surfel map backend: %s, scan leaf: %.3f m, map leaf: %.3f m, minimum occupied leaves: %zu",
                  use_concurrent_hash_map_ ? "tbb_hash" : "dense",
@@ -651,13 +638,10 @@ public:
                  surfel_leaf_voxel_size,
                  surfel_minimum_occupied_leaf_count);
 
-        points_preprocessor_->lidar_type_ = lidar_type_;
-
         lio_path_.header.stamp = ros::Time::now();
         lio_path_.header.frame_id = odometry_frame_;
-
-
         voxel_grid_.setLeafSize(voxel_resolution_, voxel_resolution_, voxel_resolution_);
+        points_preprocessor_->lidar_type_ = lidar_type_;
 
         Eigen::Vector3d lidar_to_imu_translation;
         Eigen::Matrix3d lidar_to_imu_rotation;
@@ -668,12 +652,11 @@ public:
         imu_processor_->setAccelCov(Eigen::Vector3d(accelerometer_covariance_, accelerometer_covariance_, accelerometer_covariance_));
         imu_processor_->setGyroBiasCov(Eigen::Vector3d(gyroscope_bias_covariance_, gyroscope_bias_covariance_, gyroscope_bias_covariance_));
         imu_processor_->setAccelBiasCov(Eigen::Vector3d(accelerometer_bias_covariance_, accelerometer_bias_covariance_, accelerometer_bias_covariance_));
-        imu_processor_->lidar_type_ = lidar_type_;
+        imu_processor_->setLidarType(lidar_type_);
         const ErrorStateVector convergence_limits = ErrorStateVector::Constant(0.001);
-        esikf_.initialize(
-            use_concurrent_hash_map_ ? hShareModelCallback<true> : hShareModelCallback<false>,
-            maximum_iterations_,
-            convergence_limits);
+        esikf_.initialize(use_concurrent_hash_map_ ? measurementJacobianCallback<true> : measurementJacobianCallback<false>,
+                          maximum_iterations_,
+                          convergence_limits);
 
 
         /*** ROS subscribe initialization ***/
@@ -681,28 +664,25 @@ public:
         ros::Subscriber sub_pcl;
         if (points_preprocessor_->lidar_type_ == LIVOX)
         {
-            sub_livox = node.subscribe<livox_ros_driver::CustomMsg>(
-                lidar_topic_,
-                200000,
-                &SurfelLioApplication::pcdLivoxCallback,
-                this,
-                ros::TransportHints().tcpNoDelay());
+            sub_livox = node.subscribe<livox_ros_driver::CustomMsg>(lidar_topic_,
+                                                                    200000,
+                                                                    &SurfelFastLioApplication::pcdLivoxCallback,
+                                                                    this,
+                                                                    ros::TransportHints().tcpNoDelay());
         }
         else
         {
-            sub_pcl = node.subscribe<sensor_msgs::PointCloud2>(
-                lidar_topic_,
-                200000,
-                &SurfelLioApplication::pcdCallback,
-                this,
-                ros::TransportHints().tcpNoDelay());
+            sub_pcl = node.subscribe<sensor_msgs::PointCloud2>(lidar_topic_,
+                                                               200000,
+                                                               &SurfelFastLioApplication::pcdCallback,
+                                                               this,
+                                                               ros::TransportHints().tcpNoDelay());
         }
-        auto sub_imu = node.subscribe<sensor_msgs::Imu>(
-            imu_topic_,
-            200000,
-            &SurfelLioApplication::imuCallback,
-            this,
-            ros::TransportHints().tcpNoDelay());
+        auto sub_imu = node.subscribe<sensor_msgs::Imu>(imu_topic_,
+                                                        200000,
+                                                        &SurfelFastLioApplication::imuCallback,
+                                                        this,
+                                                        ros::TransportHints().tcpNoDelay());
         auto pub_laser_cloud_full = node.advertise<sensor_msgs::PointCloud2>("/cloud_registered", 100000);
         auto pub_laser_cloud_full_body = node.advertise<sensor_msgs::PointCloud2>("/cloud_registered_body", 100000);
         auto pub_odom_aft_mapped = node.advertise<nav_msgs::Odometry>("/Odometry", 100000);
@@ -717,9 +697,17 @@ public:
             {
                 break;
             }
+
             ros::spinOnce();
             if (synchronizeMeasurements(measurements_))
             {
+                if (first_synchronized_measurement_)
+                {
+                    first_synchronized_measurement_ = false;
+                    continue;
+                }
+
+                RuntimeProfiler::Measurement runtime_measurement(runtime_profiler_);
                 imu_processor_->forwardBackwardPropagation(measurements_, esikf_, points_undistorted_lidar_);
                 esikf_state_ = esikf_.getState();
 
@@ -733,6 +721,7 @@ public:
                 voxel_grid_.setInputCloud(points_undistorted_lidar_);
                 voxel_grid_.filter(*points_voxel_lidar_);
                 num_voxel_points_ = points_voxel_lidar_->points.size();
+
                 /*** initialize the hierarchical surfel map ***/
                 const bool surfel_map_empty = use_concurrent_hash_map_ ? tbb_surfel_map_->empty() : dense_surfel_map_->empty();
                 if (surfel_map_empty)
@@ -769,20 +758,15 @@ public:
                 point_normal_vectors_->resize(num_voxel_points_);
                 points_voxel_world_->resize(num_voxel_points_);
 
-
                 /*** iterated state estimation ***/
                 esikf_.updateIterated(LASER_POINT_COV);
                 esikf_state_ = esikf_.getState();
-                orientation_message_.x = esikf_state_.rotation_.coeffs()[0];
-                orientation_message_.y = esikf_state_.rotation_.coeffs()[1];
-                orientation_message_.z = esikf_state_.rotation_.coeffs()[2];
-                orientation_message_.w = esikf_state_.rotation_.coeffs()[3];
-
 
                 /******* Publish odometry *******/
                 publishOdometry(pub_odom_aft_mapped);
+                runtime_measurement.finish();
 
-                /*** add the feature points to map kdtree ***/
+                /*** Update Surfel map ***/
                 if (use_concurrent_hash_map_)
                 {
                     updateMap<true>();
@@ -806,18 +790,16 @@ public:
         }
 
         transform_broadcaster_.reset();
+        if (runtime_profiler_.enabled())
+        {
+            ROS_INFO("Runtime: %s", runtime_profiler_.summary().c_str());
+            if (!runtime_profiler_.writeCsv())
+            {
+                ROS_ERROR("Failed to write runtime CSV '%s'.",
+                          runtime_profiler_.outputPath().c_str());
+            }
+        }
         ros::shutdown();
         return 0;
-    }
-
-private:
-    inline static SurfelLioApplication *active_application_ = nullptr;
-    inline static volatile std::sig_atomic_t exit_requested_ = 0;
-
-    template<bool UseConcurrentHashMap>
-    static void hShareModelCallback(LioState &_state,
-                                    DynamicSharedData &_measurement_data)
-    {
-        active_application_->buildMeasurementModelJacobianMatrix<UseConcurrentHashMap>(_state, _measurement_data);
     }
 };

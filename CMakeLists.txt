@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 ### Configure dependencies
-#Codex: PCL exports optional OpenMP flags even though this target uses TBB only.
+# PCL exports optional OpenMP flags even though this target uses TBB only.
 set(CMAKE_DISABLE_FIND_PACKAGE_OpenMP TRUE)
 
 ### Select ROS wrapper

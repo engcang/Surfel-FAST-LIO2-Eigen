@@ -1,8 +1,5 @@
 #pragma once
 
-#include <cmath>
-
-#include <Eigen/Cholesky>
 #include <Eigen/Core>
 
 #include "lio_state.hpp"
@@ -16,14 +13,14 @@ struct DynamicSharedData
     Eigen::Matrix<double, Eigen::Dynamic, kMeasurementStateDim> jacobian_;
 };
 
-class IterativeErrorStateKalmanFilter
+class ErrorStateIterativeKalmanFilter
 {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
     using MeasurementModel = void (*)(LioState &, DynamicSharedData &);
 
-    IterativeErrorStateKalmanFilter():
+    ErrorStateIterativeKalmanFilter():
         covariance_(StateCovariance::Identity()), convergence_limits_(ErrorStateVector::Constant(0.001))
     {
     }
@@ -67,8 +64,7 @@ public:
         const Eigen::Vector3d world_acceleration = state_.rotation_ * acceleration + state_.gravity_direction_.vector();
 
         StateCovariance derivative_jacobian = StateCovariance::Zero();
-        Eigen::Matrix<double, kErrorStateDim, kProcessNoiseDim> noise_jacobian =
-            Eigen::Matrix<double, kErrorStateDim, kProcessNoiseDim>::Zero();
+        Eigen::Matrix<double, kErrorStateDim, kProcessNoiseDim> noise_jacobian = Eigen::Matrix<double, kErrorStateDim, kProcessNoiseDim>::Zero();
 
         const Eigen::Vector3d negative_rotation_increment = -angular_velocity * _dt;
         const Eigen::Matrix3d rotation_jacobian = lie::leftJacobian(negative_rotation_increment);
@@ -90,8 +86,8 @@ public:
         state_.velocity_ += world_acceleration * _dt;
 
         StateCovariance transition = StateCovariance::Identity();
-        transition.block<2, 2>(K_GRAVITY, K_GRAVITY) =
-            state_.gravity_direction_.nx() * state_.gravity_direction_.mx(Eigen::Vector2d::Zero());
+        transition.block<3, 3>(K_ROTATION, K_ROTATION) = lie::exp(negative_rotation_increment).toRotationMatrix();
+        transition.block<2, 2>(K_GRAVITY, K_GRAVITY) = state_.gravity_direction_.nx() * state_.gravity_direction_.mx(Eigen::Vector2d::Zero());
         transition += derivative_jacobian * _dt;
         covariance_ = transition * covariance_ * transition.transpose() +
                       (_dt * noise_jacobian) * _process_noise * (_dt * noise_jacobian).transpose();
@@ -138,10 +134,10 @@ public:
             kalman_residual = posterior_information_inverse.leftCols<kMeasurementStateDim>() *
                               measurement_jacobian.transpose() * shared_data.residual_;
             StateCovariance kalman_jacobian = StateCovariance::Zero();
-            kalman_jacobian.leftCols<kMeasurementStateDim>() =
-                posterior_information_inverse.leftCols<kMeasurementStateDim>() * hessian;
+            kalman_jacobian.leftCols<kMeasurementStateDim>() = posterior_information_inverse.leftCols<kMeasurementStateDim>() * hessian;
 
             const ErrorStateVector correction = kalman_residual + (kalman_jacobian - StateCovariance::Identity()) * transported_delta;
+            const LioState state_before_correction = state_;
             state_.boxPlus(correction);
 
             shared_data.converged_ = (correction.cwiseAbs().array() <= convergence_limits_.array()).all();
@@ -157,7 +153,7 @@ public:
             if (convergence_count > 1 || iteration == maximum_iterations_ - 1)
             {
                 finalizeCovariance(state_,
-                                   propagated_state,
+                                   state_before_correction,
                                    correction,
                                    iteration_covariance,
                                    kalman_jacobian);
@@ -188,24 +184,20 @@ private:
             }
         }
 
-        const Eigen::Matrix2d gravity_transport =
-            _current.gravity_direction_.nx() * _reference.gravity_direction_.mx(_delta.segment<2>(K_GRAVITY));
-        _transported_delta.segment<2>(K_GRAVITY) =
-            gravity_transport * _transported_delta.segment<2>(K_GRAVITY);
+        const Eigen::Matrix2d gravity_transport = _current.gravity_direction_.nx() * _reference.gravity_direction_.mx(_delta.segment<2>(K_GRAVITY));
+        _transported_delta.segment<2>(K_GRAVITY) = gravity_transport * _transported_delta.segment<2>(K_GRAVITY);
         for (int column = 0; column < kErrorStateDim; ++column)
         {
-            _covariance.block<2, 1>(K_GRAVITY, column) =
-                gravity_transport * _covariance.block<2, 1>(K_GRAVITY, column);
+            _covariance.block<2, 1>(K_GRAVITY, column) = gravity_transport * _covariance.block<2, 1>(K_GRAVITY, column);
         }
         for (int row = 0; row < kErrorStateDim; ++row)
         {
-            _covariance.block<1, 2>(row, K_GRAVITY) =
-                _covariance.block<1, 2>(row, K_GRAVITY) * gravity_transport.transpose();
+            _covariance.block<1, 2>(row, K_GRAVITY) = _covariance.block<1, 2>(row, K_GRAVITY) * gravity_transport.transpose();
         }
     }
 
     void finalizeCovariance(const LioState &_current,
-                            const LioState &_reference,
+                            const LioState &_pre_correction,
                             const ErrorStateVector &_correction,
                             StateCovariance _covariance,
                             StateCovariance _kalman_jacobian)
@@ -214,45 +206,35 @@ private:
         const int rotation_indices[] = {K_ROTATION};
         for (const int index : rotation_indices)
         {
-            const Eigen::Matrix3d transport =
-                lie::leftJacobian(_correction.segment<3>(index)).transpose();
+            const Eigen::Matrix3d transport = lie::leftJacobian(_correction.segment<3>(index)).transpose();
             for (int column = 0; column < kErrorStateDim; ++column)
             {
-                left_covariance.block<3, 1>(index, column) =
-                    transport * _covariance.block<3, 1>(index, column);
+                left_covariance.block<3, 1>(index, column) = transport * _covariance.block<3, 1>(index, column);
             }
             for (int column = 0; column < kMeasurementStateDim; ++column)
             {
-                _kalman_jacobian.block<3, 1>(index, column) =
-                    transport * _kalman_jacobian.block<3, 1>(index, column);
+                _kalman_jacobian.block<3, 1>(index, column) = transport * _kalman_jacobian.block<3, 1>(index, column);
             }
             for (int row = 0; row < kErrorStateDim; ++row)
             {
-                left_covariance.block<1, 3>(row, index) =
-                    left_covariance.block<1, 3>(row, index) * transport.transpose();
-                _covariance.block<1, 3>(row, index) =
-                    _covariance.block<1, 3>(row, index) * transport.transpose();
+                left_covariance.block<1, 3>(row, index) = left_covariance.block<1, 3>(row, index) * transport.transpose();
+                _covariance.block<1, 3>(row, index) = _covariance.block<1, 3>(row, index) * transport.transpose();
             }
         }
 
-        const Eigen::Matrix2d gravity_transport =
-            _current.gravity_direction_.nx() * _reference.gravity_direction_.mx(_correction.segment<2>(K_GRAVITY));
+        const Eigen::Matrix2d gravity_transport = _current.gravity_direction_.nx() * _pre_correction.gravity_direction_.mx(_correction.segment<2>(K_GRAVITY));
         for (int column = 0; column < kErrorStateDim; ++column)
         {
-            left_covariance.block<2, 1>(K_GRAVITY, column) =
-                gravity_transport * _covariance.block<2, 1>(K_GRAVITY, column);
+            left_covariance.block<2, 1>(K_GRAVITY, column) = gravity_transport * _covariance.block<2, 1>(K_GRAVITY, column);
         }
         for (int column = 0; column < kMeasurementStateDim; ++column)
         {
-            _kalman_jacobian.block<2, 1>(K_GRAVITY, column) =
-                gravity_transport * _kalman_jacobian.block<2, 1>(K_GRAVITY, column);
+            _kalman_jacobian.block<2, 1>(K_GRAVITY, column) = gravity_transport * _kalman_jacobian.block<2, 1>(K_GRAVITY, column);
         }
         for (int row = 0; row < kErrorStateDim; ++row)
         {
-            left_covariance.block<1, 2>(row, K_GRAVITY) =
-                left_covariance.block<1, 2>(row, K_GRAVITY) * gravity_transport.transpose();
-            _covariance.block<1, 2>(row, K_GRAVITY) =
-                _covariance.block<1, 2>(row, K_GRAVITY) * gravity_transport.transpose();
+            left_covariance.block<1, 2>(row, K_GRAVITY) = left_covariance.block<1, 2>(row, K_GRAVITY) * gravity_transport.transpose();
+            _covariance.block<1, 2>(row, K_GRAVITY) = _covariance.block<1, 2>(row, K_GRAVITY) * gravity_transport.transpose();
         }
 
         covariance_ = left_covariance -

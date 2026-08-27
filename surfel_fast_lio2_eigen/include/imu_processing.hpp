@@ -4,12 +4,14 @@
 #include <cmath>
 #include <deque>
 #include <vector>
-#include <so3_math.hpp>
+
 #include <Eigen/Eigen>
-#include <common.hpp>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-#include "iterative_error_state_kalman_filter.hpp"
+
+#include "common.hpp"
+#include "eigen_lie.hpp"
+#include "error_state_iterative_kalman_filter.hpp"
 
 /// *************Preconfiguration
 
@@ -36,30 +38,29 @@ public:
     void setAccelCov(const Eigen::Vector3d &_scaler);
     void setGyroBiasCov(const Eigen::Vector3d &_b_g);
     void setAccelBiasCov(const Eigen::Vector3d &_b_a);
+    void setLidarType(int _lidar_type);
     const Eigen::Vector3d &getLidarTranslationWrtImu() const;
     const Eigen::Matrix3d &getLidarRotationWrtImu() const;
     const Eigen::Quaterniond &getGravityAlignmentRotation() const;
-    ProcessNoiseCovariance process_noise_covariance_;
     void forwardBackwardPropagation(const MeasureGroup &_meas,
-                                    IterativeErrorStateKalmanFilter &_esikf,
+                                    ErrorStateIterativeKalmanFilter &_esikf,
                                     LidarPointCloud::Ptr _undistorted_points);
 
+private:
+    void initializeImu(const MeasureGroup &_meas,
+                       ErrorStateIterativeKalmanFilter &_esikf,
+                       int &_sample_count);
+    void undistortPoints(const MeasureGroup &_meas,
+                         ErrorStateIterativeKalmanFilter &_esikf,
+                         LidarPointCloud &_undistorted_points);
+
+    ProcessNoiseCovariance process_noise_covariance_;
     Eigen::Vector3d accel_covariance_;
     Eigen::Vector3d gyro_covariance_;
     Eigen::Vector3d accel_covariance_scale_;
     Eigen::Vector3d gyro_covariance_scale_;
     Eigen::Vector3d gyro_bias_covariance_;
     Eigen::Vector3d accel_bias_covariance_;
-    int lidar_type_ = LIVOX;
-
-private:
-    void initializeImu(const MeasureGroup &_meas,
-                       IterativeErrorStateKalmanFilter &_esikf,
-                       int &_sample_count);
-    void undistortPoints(const MeasureGroup &_meas,
-                         IterativeErrorStateKalmanFilter &_esikf,
-                         LidarPointCloud &_undistorted_points);
-
     ImuSample last_imu_;
     std::vector<State15D> imu_poses_;
     Eigen::Matrix3d lidar_to_imu_rotation_;
@@ -71,6 +72,7 @@ private:
     Eigen::Vector3d last_world_acc_ = Eigen::Vector3d::Zero();
     double last_lidar_end_time_ = 0.0;
     int init_sample_count_ = 1;
+    int lidar_type_ = LIVOX;
     bool if_first_frame_ = true;
     bool if_imu_need_init_ = true;
 };
@@ -136,6 +138,11 @@ inline void ImuProcess::setAccelBiasCov(const Eigen::Vector3d &_b_a)
     accel_bias_covariance_ = _b_a;
 }
 
+inline void ImuProcess::setLidarType(int _lidar_type)
+{
+    lidar_type_ = _lidar_type;
+}
+
 inline const Eigen::Vector3d &ImuProcess::getLidarTranslationWrtImu() const
 {
     return lidar_to_imu_translation_;
@@ -152,7 +159,7 @@ inline const Eigen::Quaterniond &ImuProcess::getGravityAlignmentRotation() const
 }
 
 inline void ImuProcess::initializeImu(const MeasureGroup &_meas,
-                                      IterativeErrorStateKalmanFilter &_esikf,
+                                      ErrorStateIterativeKalmanFilter &_esikf,
                                       int &_sample_count)
 {
     /** 1. initializing the gravity, gyro bias, acc and gyro covariance
@@ -189,15 +196,13 @@ inline void ImuProcess::initializeImu(const MeasureGroup &_meas,
         _sample_count++;
     }
     LioState init_state = _esikf.getState();
-    init_state.gravity_direction_ = -mean_acc_ / mean_acc_.norm() * G_m_s2;
+    init_state.gravity_direction_ = -mean_acc_ / mean_acc_.norm() * kGravityNorm;
 
-    const Eigen::Matrix3d gravity_rotation = Eigen::Quaterniond::FromTwoVectors(
-                                                 mean_acc_.normalized(),
-                                                 Eigen::Vector3d::UnitZ())
+    const Eigen::Matrix3d gravity_rotation = Eigen::Quaterniond::FromTwoVectors(mean_acc_.normalized(),
+                                                                                Eigen::Vector3d::UnitZ())
                                                  .toRotationMatrix();
     const double gravity_rotation_yaw = std::atan2(gravity_rotation(1, 0), gravity_rotation(0, 0));
-    gravity_alignment_rotation_ = Eigen::Quaterniond(
-        Eigen::AngleAxisd(-gravity_rotation_yaw, Eigen::Vector3d::UnitZ()) * gravity_rotation);
+    gravity_alignment_rotation_ = Eigen::Quaterniond(Eigen::AngleAxisd(-gravity_rotation_yaw, Eigen::Vector3d::UnitZ()) * gravity_rotation);
     gravity_alignment_rotation_.normalize();
 
     // state_inout.rotation_ = Eigen::Matrix3d::Identity(); // Exp(mean_acc_.cross(Eigen::Vector3d(0, 0, -1 / scale_gravity)));
@@ -214,7 +219,7 @@ inline void ImuProcess::initializeImu(const MeasureGroup &_meas,
 }
 
 inline void ImuProcess::undistortPoints(const MeasureGroup &_meas,
-                                        IterativeErrorStateKalmanFilter &_esikf,
+                                        ErrorStateIterativeKalmanFilter &_esikf,
                                         LidarPointCloud &_undistorted_points)
 {
     /*** add the imu of the last frame-tail to the of current frame-head ***/
@@ -262,7 +267,7 @@ inline void ImuProcess::undistortPoints(const MeasureGroup &_meas,
             0.5 * (head.linear_acceleration_[2] + tail.linear_acceleration_[2]);
 
 
-        acc_avr = acc_avr * G_m_s2 / mean_acc_.norm(); // - state_inout.acc_bias_;
+        acc_avr = acc_avr * kGravityNorm / mean_acc_.norm(); // - state_inout.acc_bias_;
 
         if (head.timestamp_ < last_lidar_end_time_)
         {
@@ -329,7 +334,7 @@ inline void ImuProcess::undistortPoints(const MeasureGroup &_meas,
                  * Note: Compensation direction is INVERSE of Frame's moving direction
                  * So if we want to compensate a point at timestamp-i to the frame-e
                  * P_compensate = R_imu_e ^ T * (R_i * P_i + T_ei) where T_ei is represented in global frame */
-                Eigen::Matrix3d r_i(r_imu * exp(angvel_avr, dt));
+                Eigen::Matrix3d r_i(r_imu * lie::rotationMatrixExp(angvel_avr, dt));
 
                 Eigen::Vector3d p_i(it_pcl->x, it_pcl->y, it_pcl->z);
                 Eigen::Vector3d t_ei(pos_imu + vel_imu * dt + 0.5 * acc_imu * dt * dt - imu_state.position_);
@@ -348,7 +353,7 @@ inline void ImuProcess::undistortPoints(const MeasureGroup &_meas,
 }
 
 inline void ImuProcess::forwardBackwardPropagation(const MeasureGroup &_meas,
-                                                   IterativeErrorStateKalmanFilter &_esikf,
+                                                   ErrorStateIterativeKalmanFilter &_esikf,
                                                    LidarPointCloud::Ptr _undistorted_points)
 {
     if (_meas.imu_measured_.empty())
@@ -368,7 +373,7 @@ inline void ImuProcess::forwardBackwardPropagation(const MeasureGroup &_meas,
 
         if (init_sample_count_ > MAX_INI_COUNT)
         {
-            accel_covariance_ *= std::pow(G_m_s2 / mean_acc_.norm(), 2);
+            accel_covariance_ *= std::pow(kGravityNorm / mean_acc_.norm(), 2);
             if_imu_need_init_ = false;
 
             accel_covariance_ = accel_covariance_scale_;

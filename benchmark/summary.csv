@@ -1,3 +1,0 @@
-implementation,total_mean_ms,cpu_core_percent,successful_only_ape_rmse_m,successful_runs,total_runs
-FAST-LIO2 Original,15.514,56.219,10.867,34,36
-Surfel FAST-LIO2 Eigen,3.826,26.730,0.250,34,36

@@ -209,8 +209,7 @@ inline std::size_t SurfelVoxelMap::surfelCount() const noexcept
 
 inline std::uint64_t SurfelVoxelMap::VoxelKeyHash::expandBits(const std::int32_t _value) noexcept
 {
-    std::uint64_t expanded = static_cast<std::uint64_t>(
-                                 static_cast<std::int64_t>(_value) + (1LL << 20)) &
+    std::uint64_t expanded = static_cast<std::uint64_t>(static_cast<std::int64_t>(_value) + (1LL << 20)) &
                              0x1fffffULL;
     expanded = (expanded | (expanded << 32U)) & 0x1f00000000ffffULL;
     expanded = (expanded | (expanded << 16U)) & 0x1f0000ff0000ffULL;
@@ -222,17 +221,15 @@ inline std::uint64_t SurfelVoxelMap::VoxelKeyHash::expandBits(const std::int32_t
 
 inline std::size_t SurfelVoxelMap::VoxelKeyHash::operator()(const VoxelKey &_key) const noexcept
 {
-    return static_cast<std::size_t>(
-        expandBits(_key.x_) | (expandBits(_key.y_) << 1U) | (expandBits(_key.z_) << 2U));
+    return static_cast<std::size_t>(expandBits(_key.x_) | (expandBits(_key.y_) << 1U) | (expandBits(_key.z_) << 2U));
 }
 
 inline SurfelVoxelMap::VoxelKey SurfelVoxelMap::pointToLeafKey(const Eigen::Vector3f &_point) const noexcept
 {
     const float inverse_leaf_voxel_size = 1.0F / parameters_.leaf_voxel_size_;
-    return {
-        static_cast<std::int32_t>(std::floor(_point.x() * inverse_leaf_voxel_size)),
-        static_cast<std::int32_t>(std::floor(_point.y() * inverse_leaf_voxel_size)),
-        static_cast<std::int32_t>(std::floor(_point.z() * inverse_leaf_voxel_size))};
+    return {static_cast<std::int32_t>(std::floor(_point.x() * inverse_leaf_voxel_size)),
+            static_cast<std::int32_t>(std::floor(_point.y() * inverse_leaf_voxel_size)),
+            static_cast<std::int32_t>(std::floor(_point.z() * inverse_leaf_voxel_size))};
 }
 
 inline SurfelVoxelMap::VoxelKey SurfelVoxelMap::parentKey(const VoxelKey &_leaf) noexcept
@@ -282,15 +279,14 @@ inline void SurfelVoxelMap::recomputeDirtySurfels()
     }
 
     //clang-format off
-    tbb::parallel_for(
-        tbb::blocked_range<std::size_t>(0U, dirty_nodes_.size()),
-        [this](const tbb::blocked_range<std::size_t> &_range)
-        {
-            for (std::size_t index = _range.begin(); index != _range.end(); ++index)
-            {
-                recomputeSurfel(dirty_nodes_[index].first, *dirty_nodes_[index].second);
-            }
-        });
+    tbb::parallel_for(tbb::blocked_range<std::size_t>(0U, dirty_nodes_.size()),
+                      [this](const tbb::blocked_range<std::size_t> &_range)
+                      {
+                          for (std::size_t index = _range.begin(); index != _range.end(); ++index)
+                          {
+                              recomputeSurfel(dirty_nodes_[index].first, *dirty_nodes_[index].second);
+                          }
+                      });
     //clang-format on
 
     std::size_t currently_valid = 0U;
@@ -313,10 +309,9 @@ inline void SurfelVoxelMap::recomputeSurfel(const VoxelKey &_parent_key, ParentV
         {
             for (std::int32_t z_offset = 0; z_offset < 3; ++z_offset)
             {
-                const VoxelKey leaf_key{
-                    _parent_key.x_ * 3 + x_offset,
-                    _parent_key.y_ * 3 + y_offset,
-                    _parent_key.z_ * 3 + z_offset};
+                const VoxelKey leaf_key{_parent_key.x_ * 3 + x_offset,
+                                        _parent_key.y_ * 3 + y_offset,
+                                        _parent_key.z_ * 3 + z_offset};
                 const auto leaf_iterator = leaves_.find(leaf_key);
                 if (leaf_iterator != leaves_.end())
                 {
@@ -397,10 +392,9 @@ inline void SurfelVoxelMap::pruneIfNeeded(const Eigen::Vector3f &_sensor_positio
     for (auto iterator = leaves_.begin(); iterator != leaves_.end();)
     {
         const Eigen::Vector3f leaf_center = parameters_.leaf_voxel_size_ *
-                                            Eigen::Vector3f(
-                                                static_cast<float>(iterator->first.x_) + 0.5F,
-                                                static_cast<float>(iterator->first.y_) + 0.5F,
-                                                static_cast<float>(iterator->first.z_) + 0.5F);
+                                            Eigen::Vector3f(static_cast<float>(iterator->first.x_) + 0.5F,
+                                                            static_cast<float>(iterator->first.y_) + 0.5F,
+                                                            static_cast<float>(iterator->first.z_) + 0.5F);
         if ((leaf_center.array() - map_center_.array()).abs().maxCoeff() > half_extent)
         {
             iterator = leaves_.erase(iterator);

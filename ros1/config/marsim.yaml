@@ -5,14 +5,14 @@ common:
     odometry_frame: "odom"
 
 filter:
-    maximum_iterations: 3
+    maximum_iterations: 4
 
 preprocess:
     lidar_type: 4                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR,
     scan_line_count: 4
     min_range: 0.5
-    point_timestamp_unit: 2            #Codex: 0-second, 1-millisecond, 2-microsecond, 3-nanosecond.
-    scan_rate_hz: 10                #Codex: LiDAR scan rate in Hz.
+    point_timestamp_unit: 2            #0-second, 1-millisecond, 2-microsecond, 3-nanosecond.
+    scan_rate_hz: 10                #LiDAR scan rate in Hz.
     point_stride: 3
     voxel_resolution: 0.5
 
@@ -24,8 +24,13 @@ mapping:
     local_map_box_size: 200.0
     lidar_to_imu_translation: [ -0.0, -0.0, 0.0 ]
     lidar_to_imu_rotation: [ 1, 0, 0,
-                   0, 1, 0,
-                   0, 0, 1]
+                             0, 1, 0,
+                             0, 0, 1]
+
+#Disabled runtime measurement does not call the clock or allocate per scan.
+runtime:
+    enabled: false
+    output_path: "runtime.csv"
 
 publish:
     path_en:  false
@@ -34,7 +39,7 @@ publish:
     scan_bodyframe_pub_en: true  # true: output the point cloud scans in IMU-body-frame
 
 
-#Codex: Surfel map settings; false selects the lower-CPU dense voxel map.
+#Surfel map settings; false selects the lower-CPU dense voxel map.
 surfel:
     use_concurrent_hash_map: false
     leaf_voxel_size: 0.5

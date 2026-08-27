@@ -1,14 +1,14 @@
 <?xml version="1.0"?>
 <launch>
-    <arg name="config_file" default="$(find surfel_fast_lio2_eigen)/config/avia.yaml" />
+    <arg name="config_file" default="mid360.yaml" />
     <arg name="rviz" default="false" />
 
     <!-- run -->
     <node pkg="surfel_fast_lio2_eigen"
           type="surfel_fast_lio2_eigen_mapping"
-          name="laser_mapping"
+          name="surfel_fast_lio2_eigen_mapping"
           output="screen">
-        <rosparam command="load" file="$(arg config_file)" />
+        <rosparam command="load" file="$(find surfel_fast_lio2_eigen)/ros1/config/$(arg config_file)" />
     </node>
 
     <!-- visualize -->
@@ -16,6 +16,6 @@
         <node pkg="rviz"
               type="rviz"
               name="rviz"
-              args="-d $(find surfel_fast_lio2_eigen)/rviz_cfg/loam_livox.rviz" />
+              args="-d $(find surfel_fast_lio2_eigen)/ros1/rviz.rviz" />
     </group>
 </launch>

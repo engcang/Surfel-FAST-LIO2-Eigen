@@ -1,22 +1,41 @@
-<h1 align="center"><span>Surfel FAST-LIO2 Eigen</span></h1>
+<h1 align="center"><span>Surfel-FAST-LIO2-Eigen</span></h1>
 
-+ This repository provides an Eigen-only FAST-LIO2 state estimator with a two-level hierarchical voxel Surfel map.
-+ MTK, `MTK_BUILD_MANIFOLD`, IKFoM, ikd-Tree, and OpenMP are not used.
++ This repository provides an Eigen-only FAST-LIO2 state estimator with a two-level hierarchical voxel Surfel map from [Surfel-LIO](https://github.com/93won/lidar_inertial_odometry); the benchmark below measures substantially lower runtime than FAST-LIO2 Original on the tested sequences.
+  + MTK, `MTK_BUILD_MANIFOLD`, IKFoM, ikd-Tree, and OpenMP are not used.
+  + Hierarchical Surfel map with selectable dense or oneTBB concurrent-hash backends selectable once at startup.
+  + Explicit fixed-size Eigen implementation of the 17-dimensional error state, including the SO(3) perturbation and two-dimensional gravity error.
++ The proposed-method rows use the corrected right-error SO(3) covariance propagation, complete
+  S² gravity transport, final S² covariance reset, and explicit first synchronized-scan discard.
++ Initial-IMU gravity alignment published as `map_frame → odometry_frame` without changing the estimator state or map.
 + A ROS-independent C++ core is shared by separate ROS1 and ROS2 wrappers.
 
 <p align="center">
-  <img src="assets/benchmark_overview.svg" alt="FAST-LIO2 Original and Surfel FAST-LIO2 Eigen benchmark comparison" width="100%" />
+  <img src="assets/benchmark_overview.svg" alt="Surfel-FAST-LIO2-Eigen and FAST-LIO2 Original benchmark comparison" width="80%" />
 </p>
 
 <br>
 
-## Highlights
-+ Explicit fixed-size Eigen implementation of the 17-dimensional FAST-LIO2 error state, including the SO(3) perturbation and two-dimensional gravity error.
-+ Eigen-only iterated error-state Kalman filter, IMU propagation, point undistortion, measurement iteration, and covariance update.
-+ Hierarchical point-to-plane Surfel map with dense and oneTBB concurrent-hash backends selectable once at startup.
-+ PCL centroid-based `VoxelGrid` scan downsampling, preserving the estimator input used during accuracy validation.
-+ Initial-IMU gravity alignment published as `map_frame → odometry_frame` without changing the estimator state or map.
-+ Livox, Velodyne, Ouster, and MARSIM point-cloud preprocessing.
+## FAST-LIO2 Original comparison
+
++ FAST-LIO2 Original values come from the one-run upstream ROS1 reference campaign; the proposed
+  columns use the current corrected ROS2 results reported in this README. NCD and NTU used the same
+  physical sensor streams. HILTI used Mid70 for Original and Ouster for the proposed method, so
+  those three rows are cross-sensor dataset references rather than controlled comparisons.
+
+| Sequence | FAST-LIO2 Original APE RMSE (m) | Surfel-FAST-LIO2-Eigen APE RMSE (m) | Original runtime (ms/scan) | Surfel-FAST-LIO2-Eigen runtime (ms/scan) | Original CPU (% one core) | Surfel-FAST-LIO2-Eigen CPU (% one core) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `HILTI Basement_1 (Mid70 / Ouster)` | 0.1646 | **0.1635** | **1.500** | 2.574 | **23.49** | 24.07 |
+| `HILTI Construction_Site_2 (Mid70 / Ouster)` | 0.2922 | **0.0724** | 2.807 | **1.996** | 27.89 | **26.24** |
+| `HILTI uzh_tracking_area_run2 (Mid70 / Ouster)` | 0.2368 | **0.1767** | **2.334** | 2.734 | **25.58** | 27.93 |
+| `Newer College 01_short` | 0.3800 | **0.3371** | 13.225 | **2.108** | 57.68 | **32.00** |
+| `Newer College 02_long` | **0.3485** | 0.3745 | 14.503 | **2.223** | 61.64 | **33.16** |
+| `Newer College 05_quad` | 0.1030 | **0.0942** | 12.847 | **2.421** | 57.19 | **32.17** |
+| `NTU VIRAL eee_02` | 0.0713 | **0.0711** | 8.285 | **1.189** | 43.69 | **26.92** |
+| `NTU VIRAL nya_03` | 0.1029 | **0.1014** | 5.921 | **1.110** | 36.50 | **24.78** |
+| `NTU VIRAL rtp_02` | 0.3966 | **0.1292** | 8.557 | **1.529** | 43.70 | **27.44** |
+| `NTU VIRAL sbs_02` | 0.0723 | **0.0714** | 6.798 | **1.012** | 39.51 | **25.77** |
+| `NTU VIRAL spms_01` | 0.2271 | **0.2092** | 8.716 | **1.241** | 45.53 | **29.44** |
+| `NTU VIRAL tnp_02` | **0.0873** | 0.0909 | 6.071 | **1.314** | 36.75 | **24.04** |
 
 <br>
 
@@ -31,77 +50,48 @@
 <br>
 
 ## How to install
-+ Install the ROS2 package with
++ Clone and install as follows:
+  ```bash
+  cd ~/<your_ros2_workspace>/src
+  git clone https://github.com/engcang/surfel-fast-lio2-eigen.git
 
-```bash
-cd ~/<your_ros2_workspace>/src
-git clone https://github.com/engcang/surfel-fast-lio2-eigen.git
+  # ROS2
+  cd ~/<your_ros2_workspace>
+  source /opt/ros/jazzy/setup.bash
+  colcon build --packages-select surfel_fast_lio2_eigen --cmake-args -DCMAKE_BUILD_TYPE=Release
+  source install/setup.bash
 
-cd ~/<your_ros2_workspace>
-source /opt/ros/jazzy/setup.bash
-colcon build --packages-select surfel_fast_lio2_eigen \
-    --cmake-args -DCMAKE_BUILD_TYPE=Release
-source install/setup.bash
-```
-
-+ Install the ROS1 package with
-
-```bash
-cd ~/<your_catkin_workspace>/src
-git clone https://github.com/engcang/surfel-fast-lio2-eigen.git
-
-cd ~/<your_catkin_workspace>
-source /opt/ros/noetic/setup.bash
-catkin build surfel_fast_lio2_eigen --cmake-args -DCMAKE_BUILD_TYPE=Release
-source devel/setup.bash
-```
+  # ROS1
+  cd ~/<your_catkin_workspace>
+  source /opt/ros/noetic/setup.bash
+  catkin build surfel_fast_lio2_eigen --cmake-args -DCMAKE_BUILD_TYPE=Release
+  source devel/setup.bash
+  ```
 
 <br>
 
 ## How to use
 + Run the ROS2 node with
-
-```bash
-ros2 launch surfel_fast_lio2_eigen run.launch.py \
-    config_file:=$(ros2 pkg prefix surfel_fast_lio2_eigen)/share/surfel_fast_lio2_eigen/config/avia.yaml \
-    rviz:=false
-```
+  ```bash
+  ros2 launch surfel_fast_lio2_eigen run.launch.py \
+      config_file:=mid360.yaml \
+      rviz:=false
+  ```
 
 + Run the ROS1 node with
-
-```bash
-roslaunch surfel_fast_lio2_eigen run.launch \
-    config_file:=$(rospack find surfel_fast_lio2_eigen)/config/avia.yaml \
-    rviz:=false
-```
+  ```bash
+  roslaunch surfel_fast_lio2_eigen run.launch \
+      config_file:=mid360.yaml \
+      rviz:=false
+  ```
 
 + Select the Surfel map backend in the config YAML before startup.
-
-```yaml
-surfel:
-  use_concurrent_hash_map: false
-```
-
-+ `false` selects the dense backend and is recommended for CPU-constrained onboard computers.
-+ `true` selects the oneTBB concurrent-hash backend when lower mapping latency is worth additional CPU use.
-+ Configure the gravity-aligned parent frame and estimator output frame with `common.map_frame` and `common.odometry_frame`.
-
-<br>
-
-## Performance
-+ The table summarizes the 12-sequence, three-run comparison represented in the figure above.
-
-| Metric | FAST-LIO2 Original | Surfel FAST-LIO2 Eigen | Change |
-| --- | ---: | ---: | ---: |
-| Mean internal pipeline time | 15.514 ms/scan | 3.826 ms/scan | **4.05× faster**, 75.3% lower |
-| Whole-process CPU | 56.219% of one core | 26.730% of one core | **52.5% lower** |
-| Successful-run translation APE RMSE | 10.867 m | 0.250 m | **97.7% lower** |
-| Successful runs | 34/36 | 34/36 | Equal under the common criteria |
-
-+ The test set contains three Newer College, three 2021 HILTI, and six NTU VIRAL sequences, with each sequence executed three times at one-times bag playback.
-+ APE is translation error after EVO rigid SE(3) alignment without scale correction. The reported APE is the macro mean over successful runs; failures are not silently included as valid accuracy measurements.
-+ FAST-LIO2 Original ran with ROS1 Noetic in the prepared container, while the Surfel implementation ran with ROS2 Jazzy on the host. The inputs, playback rate, and CPU affinity were held constant, but middleware and dependency versions differed.
-+ These measurements describe the tested machine and configurations rather than a universal speed or accuracy guarantee. The compact source values and plotting command are in [`benchmark/`](benchmark/README.md).
+  + `false` selects the dense backend and is recommended for CPU-constrained onboard computers.
+  + `true` selects the oneTBB concurrent-hash backend when lower map-update runtime is worth additional CPU use.
+    ```yaml
+    surfel:
+      use_concurrent_hash_map: false
+    ```
 
 <br>
 
@@ -113,22 +103,8 @@ surfel:
 
 <br>
 
-## Layout
-+ `surfel_fast_lio2_eigen/include/` contains the ROS-independent preprocessing, state, Lie math, ESIKF, IMU propagation, and Surfel map implementations.
-+ `ros1/` contains the ROS1 message adapter, application, configs, launch file, and node entry point.
-+ `ros2/` contains the ROS2 message adapter, application, configs, launch file, and node entry point.
-+ `third_party/` contains vendored header-only dependencies with their original notices.
-+ `benchmark/` contains the compact benchmark summary and plot generator.
-
-<br>
-
-## Acknowledgements
+## LICENSE
 + This repository is a derivative of [FAST-LIO2](https://github.com/hku-mars/FAST_LIO). The repository as a whole is therefore distributed under GNU GPL version 2; source-file notices inherited from FAST-LIO2 and LOAM are retained.
 + The hierarchical voxel Surfel mapping design follows [Surfel-LIO](https://github.com/93won/lidar_inertial_odometry) and its associated paper.
 + `ankerl::unordered_dense` is vendored under the MIT License. Eigen, PCL, oneTBB, ROS, and Livox driver components remain under their respective licenses.
-
-<br>
-
-## LICENSE
-+ This repository is free software distributed under the [GNU General Public License, version 2 only](LICENSE).
 + You may use, study, modify, and redistribute it under the GPL-2.0-only terms. Distributed modifications must preserve applicable copyright and license notices and remain GPL-compatible.

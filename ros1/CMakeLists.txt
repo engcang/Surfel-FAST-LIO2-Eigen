@@ -16,6 +16,7 @@ catkin_package()
 
 ### Build node
 add_executable(${PROJECT_NAME}_mapping src/main_node.cpp)
+add_dependencies(${PROJECT_NAME}_mapping ${catkin_EXPORTED_TARGETS})
 target_include_directories(${PROJECT_NAME}_mapping PRIVATE
     include
     src
@@ -36,6 +37,12 @@ target_link_libraries(${PROJECT_NAME}_mapping
 install(TARGETS ${PROJECT_NAME}_mapping
     RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
-install(DIRECTORY config launch rviz_cfg
+install(DIRECTORY config
+    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/ros1
+)
+install(DIRECTORY launch
     DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+install(FILES rviz.rviz
+    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/ros1
 )

@@ -9,8 +9,6 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
-#define G_m_s2 (9.81) // Gravaty const in GuangDong/China
-
 #define VEC_FROM_ARRAY(v) v[0], v[1], v[2]
 #define MAT_FROM_ARRAY(v) v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]
 
@@ -39,7 +37,8 @@ enum LidarType
     LIVOX = 1,
     VELODYNE,
     OUSTER,
-    MARSIM
+    MARSIM,
+    HESAI
 };
 
 struct MeasureGroup // Lidar data and imu dates for the curent process

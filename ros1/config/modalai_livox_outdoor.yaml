@@ -11,8 +11,8 @@ preprocess:
     lidar_type: 1
     scan_line_count: 4
     min_range: 0.5
-    point_timestamp_unit: 2           #Codex: 0-second, 1-millisecond, 2-microsecond, 3-nanosecond.
-    scan_rate_hz: 10               #Codex: LiDAR scan rate in Hz.
+    point_timestamp_unit: 2           #0-second, 1-millisecond, 2-microsecond, 3-nanosecond.
+    scan_rate_hz: 10               #LiDAR scan rate in Hz.
     point_stride: 2
     voxel_resolution: 0.5
 
@@ -24,17 +24,22 @@ mapping:
     local_map_box_size: 200.0
     lidar_to_imu_translation: [-0.011, -0.02329, 0.04412]
     lidar_to_imu_rotation: [1, 0, 0,
-                  0, 1, 0,
-                  0, 0, 1]
+                            0, 1, 0,
+                            0, 0, 1]
+
+#Disabled runtime measurement does not call the clock or allocate per scan.
+runtime:
+    enabled: false
+    output_path: "runtime.csv"
 
 publish:
     path_en: false
-    scan_publish_en: false      #Codex: false disables the registered point-cloud output.
-    dense_publish_en: false     #Codex: false publishes a downsampled registered cloud.
-    scan_bodyframe_pub_en: false #Codex: true publishes scans in the IMU body frame.
+    scan_publish_en: false      #false disables the registered point-cloud output.
+    dense_publish_en: false     #false publishes a downsampled registered cloud.
+    scan_bodyframe_pub_en: false #true publishes scans in the IMU body frame.
 
 
-#Codex: Surfel map settings; false selects the lower-CPU dense voxel map.
+#Surfel map settings; false selects the lower-CPU dense voxel map.
 surfel:
     use_concurrent_hash_map: false
     leaf_voxel_size: 0.5

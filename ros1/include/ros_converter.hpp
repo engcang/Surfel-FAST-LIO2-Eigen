@@ -76,10 +76,8 @@ inline void RosConverter::preProcessPoints(const sensor_msgs::PointCloud2::Const
 inline void RosConverter::livoxHandler(const livox_ros_driver::CustomMsg::ConstPtr &_msg)
 {
     preprocessed_cloud_.clear();
-    livox_working_cloud_.clear();
     const std::uint32_t point_count = _msg->point_num;
     preprocessed_cloud_.reserve(point_count);
-    livox_working_cloud_.resize(point_count);
     std::uint32_t valid_point_count = 0;
 
     for (std::uint32_t i = 1; i < point_count; ++i)
@@ -96,22 +94,26 @@ inline void RosConverter::livoxHandler(const livox_ros_driver::CustomMsg::ConstP
             continue;
         }
 
-        livox_working_cloud_[i].x = _msg->points[i].x;
-        livox_working_cloud_[i].y = _msg->points[i].y;
-        livox_working_cloud_[i].z = _msg->points[i].z;
-        livox_working_cloud_[i].intensity = _msg->points[i].reflectivity;
-        livox_working_cloud_[i].curvature = _msg->points[i].offset_time / static_cast<float>(1000000); // use curvature as time of each laser points, curvature unit: ms
+        const auto &input_point = _msg->points[i];
+        const auto &previous_point = _msg->points[i - 1];
+        LidarPoint output_point;
+        output_point.x = input_point.x;
+        output_point.y = input_point.y;
+        output_point.z = input_point.z;
+        output_point.intensity = input_point.reflectivity;
+        output_point.curvature = input_point.offset_time / static_cast<float>(1000000); // use curvature as time of each laser points, curvature unit: ms
 
-        const bool differs_from_previous =
-            (std::abs(livox_working_cloud_[i].x - livox_working_cloud_[i - 1].x) > 1e-7) ||
-            (std::abs(livox_working_cloud_[i].y - livox_working_cloud_[i - 1].y) > 1e-7) ||
-            (std::abs(livox_working_cloud_[i].z - livox_working_cloud_[i - 1].z) > 1e-7);
-        const double squared_range = livox_working_cloud_[i].x * livox_working_cloud_[i].x +
-                                     livox_working_cloud_[i].y * livox_working_cloud_[i].y +
-                                     livox_working_cloud_[i].z * livox_working_cloud_[i].z;
-        if (differs_from_previous && squared_range > minimum_range_ * minimum_range_)
+        const bool differs_from_previous = (std::abs(input_point.x - previous_point.x) > 1e-7) ||
+                                           (std::abs(input_point.y - previous_point.y) > 1e-7) ||
+                                           (std::abs(input_point.z - previous_point.z) > 1e-7);
+        const double squared_range = output_point.x * output_point.x +
+                                     output_point.y * output_point.y +
+                                     output_point.z * output_point.z;
+        if (differs_from_previous &&
+            std::isfinite(squared_range) &&
+            squared_range > minimum_range_ * minimum_range_)
         {
-            preprocessed_cloud_.push_back(livox_working_cloud_[i]);
+            preprocessed_cloud_.push_back(output_point);
         }
     }
 }
@@ -134,7 +136,8 @@ inline void RosConverter::ousterHandler(const sensor_msgs::PointCloud2::ConstPtr
         const double squared_range = input_point.x * input_point.x +
                                      input_point.y * input_point.y +
                                      input_point.z * input_point.z;
-        if (squared_range < minimum_range_ * minimum_range_)
+        if (!std::isfinite(squared_range) ||
+            squared_range < minimum_range_ * minimum_range_)
         {
             continue;
         }
@@ -219,7 +222,8 @@ inline void RosConverter::velodyneHandler(const sensor_msgs::PointCloud2::ConstP
             const double squared_range = output_point.x * output_point.x +
                                          output_point.y * output_point.y +
                                          output_point.z * output_point.z;
-            if (squared_range > minimum_range_ * minimum_range_)
+            if (std::isfinite(squared_range) &&
+                squared_range > minimum_range_ * minimum_range_)
             {
                 preprocessed_cloud_.points.push_back(output_point);
             }
@@ -239,7 +243,8 @@ inline void RosConverter::simulationHandler(const sensor_msgs::PointCloud2::Cons
         const double squared_range = input_point.x * input_point.x +
                                      input_point.y * input_point.y +
                                      input_point.z * input_point.z;
-        if (squared_range < minimum_range_ * minimum_range_)
+        if (!std::isfinite(squared_range) ||
+            squared_range < minimum_range_ * minimum_range_)
         {
             continue;
         }

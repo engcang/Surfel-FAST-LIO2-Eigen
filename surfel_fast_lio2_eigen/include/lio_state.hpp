@@ -7,7 +7,7 @@
 
 #include "eigen_lie.hpp"
 
-constexpr double kGravityNorm = 9.809;
+constexpr double kGravityNorm = 9.81;
 constexpr int kErrorStateDim = 17;
 constexpr int kProcessNoiseDim = 12;
 constexpr int kMeasurementStateDim = 6;
@@ -91,7 +91,10 @@ public:
         }
 
         const Eigen::Vector3d tangent_rotation = gravity_basis * _delta;
-        return -lie::hat(direction_vector_) * lie::leftJacobian(tangent_rotation).transpose() * gravity_basis;
+        return -lie::exp(tangent_rotation).toRotationMatrix() *
+               lie::hat(direction_vector_) *
+               lie::leftJacobian(tangent_rotation).transpose() *
+               gravity_basis;
     }
 
     void boxPlus(const Eigen::Vector2d &_delta)

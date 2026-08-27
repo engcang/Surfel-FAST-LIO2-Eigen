@@ -22,6 +22,23 @@ namespace lie
         return result;
     }
 
+    inline Matrix3d rotationMatrixExp(const Vector3d &_angular_velocity,
+                                      const double _dt)
+    {
+        const double angular_speed = _angular_velocity.norm();
+        const Matrix3d identity = Matrix3d::Identity();
+        if (angular_speed <= 1.0e-7)
+        {
+            return identity;
+        }
+
+        const Vector3d rotation_axis = _angular_velocity / angular_speed;
+        const Matrix3d rotation_axis_hat = hat(rotation_axis);
+        const double rotation_angle = angular_speed * _dt;
+        return identity + std::sin(rotation_angle) * rotation_axis_hat +
+               (1.0 - std::cos(rotation_angle)) * rotation_axis_hat * rotation_axis_hat;
+    }
+
     inline Quaterniond exp(const Vector3d &_rotation_vector)
     {
         const double scale = 0.5;
