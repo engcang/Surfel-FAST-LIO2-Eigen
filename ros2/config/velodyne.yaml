@@ -35,10 +35,10 @@ laser_mapping:
             output_path: "runtime.csv"
 
         publish:
-            path_en:  false
-            scan_publish_en:  true       # false: close all the point cloud output
-            dense_publish_en: true       # false: low down the points number in a global-frame point clouds scan.
-            scan_bodyframe_pub_en: true  # true: output the point cloud scans in IMU-body-frame
+            path_en: true
+            scan_publish_en: true #False closes all point-cloud output.
+            dense_publish_en: true #False reduces the number of points in the global-frame scan.
+            scan_bodyframe_pub_en: false #True publishes point-cloud scans in the IMU body frame.
 
 
         #Surfel map settings; false selects the lower-CPU dense voxel map.
