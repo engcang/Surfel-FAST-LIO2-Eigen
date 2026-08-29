@@ -1,8 +1,11 @@
 #ifndef ROS_CONVERTER_HPP
 #define ROS_CONVERTER_HPP
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
+#include <limits>
 #include <vector>
 
 #include <livox_ros_driver2/msg/custom_msg.hpp>
@@ -23,6 +26,7 @@ private:
     void livoxHandler(const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr &_msg);
     void ousterHandler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &_msg);
     void hesaiHandler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &_msg);
+    void robosenseHandler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &_msg);
     void velodyneHandler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &_msg);
     void simulationHandler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &_msg);
 };
@@ -63,6 +67,9 @@ inline void RosConverter::preProcessPoints(const sensor_msgs::msg::PointCloud2::
             break;
         case HESAI:
             hesaiHandler(_msg);
+            break;
+        case ROBOSENSE:
+            robosenseHandler(_msg);
             break;
         case VELODYNE:
             velodyneHandler(_msg);
@@ -206,6 +213,97 @@ inline void RosConverter::hesaiHandler(const sensor_msgs::msg::PointCloud2::Cons
         output_point.normal_y = 0.0F;
         output_point.normal_z = 0.0F;
         output_point.curvature = static_cast<float>(point_time_offset > 0.0 ? point_time_offset * 1.0e3 : 0.0);
+        preprocessed_cloud_.points.push_back(output_point);
+    }
+}
+
+inline void RosConverter::robosenseHandler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &_msg)
+{
+    preprocessed_cloud_.clear();
+    pcl::PointCloud<robosense::Point> original_cloud;
+    pcl::fromROSMsg(*_msg, original_cloud);
+    const std::size_t point_count = original_cloud.size();
+    if (point_count == 0U)
+    {
+        return;
+    }
+    preprocessed_cloud_.reserve(point_count);
+
+    double reference_timestamp = 0.0;
+    bool has_finite_timestamp = false;
+    for (const robosense::Point &point : original_cloud.points)
+    {
+        if (std::isfinite(point.timestamp))
+        {
+            reference_timestamp = point.timestamp;
+            has_finite_timestamp = true;
+            break;
+        }
+    }
+    if (!has_finite_timestamp)
+    {
+        return;
+    }
+
+    constexpr double timestamp_wrap_period_seconds = 3600.0;
+    std::vector<double> unwrapped_timestamps(point_count,
+                                             std::numeric_limits<double>::quiet_NaN());
+    double minimum_timestamp = std::numeric_limits<double>::infinity();
+    for (std::size_t i = 0; i < point_count; ++i)
+    {
+        const double timestamp = original_cloud.points[i].timestamp;
+        if (!std::isfinite(timestamp))
+        {
+            continue;
+        }
+
+        const double wrap_count = std::round((reference_timestamp - timestamp) /
+                                             timestamp_wrap_period_seconds);
+        const double unwrapped_timestamp = timestamp + wrap_count * timestamp_wrap_period_seconds;
+        unwrapped_timestamps[i] = unwrapped_timestamp;
+        minimum_timestamp = std::min(minimum_timestamp, unwrapped_timestamp);
+    }
+
+    constexpr double maximum_scan_duration_seconds = 0.5;
+    for (std::size_t i = 0; i < point_count; ++i)
+    {
+        if (i % static_cast<std::size_t>(point_stride_) != 0U)
+        {
+            continue;
+        }
+
+        const robosense::Point &input_point = original_cloud.points[i];
+        if (!std::isfinite(input_point.timestamp))
+        {
+            continue;
+        }
+
+        const double squared_range = input_point.x * input_point.x +
+                                     input_point.y * input_point.y +
+                                     input_point.z * input_point.z;
+        if (!std::isfinite(squared_range) ||
+            squared_range < minimum_range_ * minimum_range_)
+        {
+            continue;
+        }
+
+        const double relative_time = unwrapped_timestamps[i] - minimum_timestamp;
+        if (!std::isfinite(relative_time) ||
+            relative_time < 0.0 ||
+            relative_time > maximum_scan_duration_seconds)
+        {
+            continue;
+        }
+
+        LidarPoint output_point;
+        output_point.x = input_point.x;
+        output_point.y = input_point.y;
+        output_point.z = input_point.z;
+        output_point.intensity = input_point.intensity;
+        output_point.normal_x = 0.0F;
+        output_point.normal_y = 0.0F;
+        output_point.normal_z = 0.0F;
+        output_point.curvature = static_cast<float>(relative_time * 1.0e3);
         preprocessed_cloud_.points.push_back(output_point);
     }
 }

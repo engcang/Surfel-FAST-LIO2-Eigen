@@ -169,6 +169,22 @@ private:
         return _stamp.toSec();
     }
 
+    static double scanDurationSeconds(const LidarPointCloud &_point_cloud)
+    {
+        double maximum_point_time_milliseconds = 0.0;
+        for (const LidarPoint &point : _point_cloud.points)
+        {
+            const double point_time_milliseconds = static_cast<double>(point.curvature);
+            if (std::isfinite(point_time_milliseconds) &&
+                point_time_milliseconds >= 0.0)
+            {
+                maximum_point_time_milliseconds = std::max(maximum_point_time_milliseconds,
+                                                           point_time_milliseconds);
+            }
+        }
+        return maximum_point_time_milliseconds * 1.0e-3;
+    }
+
     void pointLidarToWorld(LidarPoint const *const _pi, LidarPoint *const _po)
     {
         const Eigen::Vector3d &lidar_to_imu_translation = imu_processor_->getLidarTranslationWrtImu();
@@ -272,22 +288,22 @@ private:
         {
             _meas.lidar_measured_ = lidar_buffer_.front();
             _meas.lidar_beg_time_ = time_buffer_.front();
-
+            const double lidar_scan_time = scanDurationSeconds(*_meas.lidar_measured_);
 
             if (_meas.lidar_measured_->points.size() <= 1) // time too little
             {
                 lidar_end_time_ = _meas.lidar_beg_time_ + lidar_mean_scantime_;
                 ROS_WARN("Too few input point cloud!");
             }
-            else if (_meas.lidar_measured_->points.back().curvature / static_cast<double>(1000) < 0.5 * lidar_mean_scantime_)
+            else if (lidar_scan_time < 0.5 * lidar_mean_scantime_)
             {
                 lidar_end_time_ = _meas.lidar_beg_time_ + lidar_mean_scantime_;
             }
             else
             {
                 count_lidar_scan_++;
-                lidar_end_time_ = _meas.lidar_beg_time_ + _meas.lidar_measured_->points.back().curvature / static_cast<double>(1000);
-                lidar_mean_scantime_ += (_meas.lidar_measured_->points.back().curvature / static_cast<double>(1000) - lidar_mean_scantime_) / count_lidar_scan_;
+                lidar_end_time_ = _meas.lidar_beg_time_ + lidar_scan_time;
+                lidar_mean_scantime_ += (lidar_scan_time - lidar_mean_scantime_) / count_lidar_scan_;
             }
             if (lidar_type_ == MARSIM)
                 lidar_end_time_ = _meas.lidar_beg_time_;
