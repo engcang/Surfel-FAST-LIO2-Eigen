@@ -229,39 +229,17 @@ inline void RosConverter::robosenseHandler(const sensor_msgs::msg::PointCloud2::
     }
     preprocessed_cloud_.reserve(point_count);
 
-    double reference_timestamp = 0.0;
-    bool has_finite_timestamp = false;
+    double minimum_timestamp = std::numeric_limits<double>::infinity();
     for (const robosense::Point &point : original_cloud.points)
     {
         if (std::isfinite(point.timestamp))
         {
-            reference_timestamp = point.timestamp;
-            has_finite_timestamp = true;
-            break;
+            minimum_timestamp = std::min(minimum_timestamp, point.timestamp);
         }
     }
-    if (!has_finite_timestamp)
+    if (!std::isfinite(minimum_timestamp))
     {
         return;
-    }
-
-    constexpr double timestamp_wrap_period_seconds = 3600.0;
-    std::vector<double> unwrapped_timestamps(point_count,
-                                             std::numeric_limits<double>::quiet_NaN());
-    double minimum_timestamp = std::numeric_limits<double>::infinity();
-    for (std::size_t i = 0; i < point_count; ++i)
-    {
-        const double timestamp = original_cloud.points[i].timestamp;
-        if (!std::isfinite(timestamp))
-        {
-            continue;
-        }
-
-        const double wrap_count = std::round((reference_timestamp - timestamp) /
-                                             timestamp_wrap_period_seconds);
-        const double unwrapped_timestamp = timestamp + wrap_count * timestamp_wrap_period_seconds;
-        unwrapped_timestamps[i] = unwrapped_timestamp;
-        minimum_timestamp = std::min(minimum_timestamp, unwrapped_timestamp);
     }
 
     constexpr double maximum_scan_duration_seconds = 0.5;
@@ -287,7 +265,7 @@ inline void RosConverter::robosenseHandler(const sensor_msgs::msg::PointCloud2::
             continue;
         }
 
-        const double relative_time = unwrapped_timestamps[i] - minimum_timestamp;
+        const double relative_time = input_point.timestamp - minimum_timestamp;
         if (!std::isfinite(relative_time) ||
             relative_time < 0.0 ||
             relative_time > maximum_scan_duration_seconds)

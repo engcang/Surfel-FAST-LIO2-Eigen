@@ -18,9 +18,9 @@ namespace velodyne_ros
     struct EIGEN_ALIGN16 Point
     {
         PCL_ADD_POINT4D;
-        float intensity; //Codex: NOLINT(readability-identifier-naming) PCL schema field.
-        float time;      //Codex: NOLINT(readability-identifier-naming) PCL schema field.
-        uint16_t ring;   //Codex: NOLINT(readability-identifier-naming) PCL schema field.
+        float intensity; // NOLINT(readability-identifier-naming) PCL schema field.
+        float time;      // NOLINT(readability-identifier-naming) PCL schema field.
+        uint16_t ring;   // NOLINT(readability-identifier-naming) PCL schema field.
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     };
 } // namespace velodyne_ros
@@ -41,12 +41,12 @@ namespace ouster_ros
     struct EIGEN_ALIGN16 Point
     {
         PCL_ADD_POINT4D;
-        float intensity;       //Codex: NOLINT(readability-identifier-naming) PCL schema field.
-        uint32_t t;            //Codex: NOLINT(readability-identifier-naming) PCL schema field.
-        uint16_t reflectivity; //Codex: NOLINT(readability-identifier-naming) PCL schema field.
-        uint8_t ring;          //Codex: NOLINT(readability-identifier-naming) PCL schema field.
-        uint16_t ambient;      //Codex: NOLINT(readability-identifier-naming) PCL schema field.
-        uint32_t range;        //Codex: NOLINT(readability-identifier-naming) PCL schema field.
+        float intensity;       // NOLINT(readability-identifier-naming) PCL schema field.
+        uint32_t t;            // NOLINT(readability-identifier-naming) PCL schema field.
+        uint16_t reflectivity; // NOLINT(readability-identifier-naming) PCL schema field.
+        uint8_t ring;          // NOLINT(readability-identifier-naming) PCL schema field.
+        uint16_t ambient;      // NOLINT(readability-identifier-naming) PCL schema field.
+        uint32_t range;        // NOLINT(readability-identifier-naming) PCL schema field.
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     };
 } // namespace ouster_ros
@@ -71,9 +71,9 @@ namespace hesai_ros
     struct EIGEN_ALIGN16 Point
     {
         PCL_ADD_POINT4D;
-        float intensity;    //Codex: NOLINT(readability-identifier-naming) PCL schema field.
-        std::uint16_t ring; //Codex: NOLINT(readability-identifier-naming) PCL schema field.
-        double timestamp;   //Codex: NOLINT(readability-identifier-naming) PCL schema field.
+        float intensity;    // NOLINT(readability-identifier-naming) PCL schema field.
+        std::uint16_t ring; // NOLINT(readability-identifier-naming) PCL schema field.
+        double timestamp;   // NOLINT(readability-identifier-naming) PCL schema field.
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     };
 } // namespace hesai_ros
@@ -94,9 +94,9 @@ namespace robosense
     struct EIGEN_ALIGN16 Point
     {
         PCL_ADD_POINT4D;
-        float intensity;        //Codex: NOLINT(readability-identifier-naming) PCL schema field.
-        std::uint16_t ring = 0; //Codex: NOLINT(readability-identifier-naming) PCL schema field.
-        double timestamp = 0.0; //Codex: NOLINT(readability-identifier-naming) PCL schema field in seconds.
+        float intensity;        // NOLINT(readability-identifier-naming) PCL schema field.
+        std::uint16_t ring = 0; // NOLINT(readability-identifier-naming) PCL schema field.
+        double timestamp = 0.0; // NOLINT(readability-identifier-naming) PCL schema field in seconds.
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     };
 } // namespace robosense

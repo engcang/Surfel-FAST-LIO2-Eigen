@@ -10,12 +10,12 @@ laser_mapping:
             maximum_iterations: 4
 
         preprocess:
-            lidar_type: 5 #Codex: 5 selects Hesai PointCloud2 with an absolute float64 timestamp field.
+            lidar_type: 5 # 5 selects Hesai PointCloud2 with an absolute float64 timestamp field.
             scan_line_count: 32
             scan_rate_hz: 10
             point_stride: 2
             voxel_resolution: 0.5
-            point_timestamp_unit: 0 #Codex: The Hesai converter reads its absolute timestamp field directly.
+            point_timestamp_unit: 0 # The Hesai converter reads its absolute timestamp field directly.
             min_range: 0.5
 
         mapping:
@@ -29,18 +29,18 @@ laser_mapping:
                                     0.9999924503430049, -0.003885344318275846, -0.00005793549097738286,
                                     0.00006832120631549819, 0.002672969443383787, 0.9999964252768944]
 
-        #Codex: Disabled runtime measurement does not call the clock or allocate per scan.
+        # Disabled runtime measurement does not call the clock or allocate per scan.
         runtime:
             enabled: false
             output_path: "runtime.csv"
 
         publish:
             path_en: true
-            scan_publish_en: true #Codex: False closes all point-cloud output.
-            dense_publish_en: true #Codex: False reduces the number of points in the global-frame scan.
-            scan_bodyframe_pub_en: false #Codex: True publishes point-cloud scans in the IMU body frame.
+            scan_publish_en: true # False closes all point-cloud output.
+            dense_publish_en: true # False reduces the number of points in the global-frame scan.
+            scan_bodyframe_pub_en: false # True publishes point-cloud scans in the IMU body frame.
 
-        #Codex: Surfel map settings; false selects the lower-CPU dense voxel map.
+        # Surfel map settings; false selects the lower-CPU dense voxel map.
         surfel:
             use_concurrent_hash_map: false
             leaf_voxel_size: 0.5
