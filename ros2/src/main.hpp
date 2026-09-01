@@ -848,7 +848,6 @@ public:
 
                 /******* Publish odometry *******/
                 publishOdometry(pub_odom_aft_mapped);
-                runtime_measurement.finish();
 
                 /*** Update Surfel map ***/
                 if (use_concurrent_hash_map_)
@@ -859,6 +858,7 @@ public:
                 {
                     updateMap<false>();
                 }
+                runtime_measurement.finish();
 
                 /******* Publish points *******/
                 if (path_enabled_)
