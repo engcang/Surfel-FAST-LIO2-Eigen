@@ -458,6 +458,8 @@ private:
         jjj++;
         if (jjj % 10 == 0)
         {
+            // RViz transforms the whole path using this header's timestamp.
+            lio_path_.header = body_pose_message_.header;
             lio_path_.poses.push_back(body_pose_message_);
             _pub_path.publish(lio_path_);
         }
@@ -610,9 +612,7 @@ public:
             return 1;
         }
         use_concurrent_hash_map_ = parameter<bool>(private_node, "surfel.use_concurrent_hash_map", false);
-        const float surfel_leaf_voxel_size = static_cast<float>(parameter<double>(private_node,
-                                                                                  "surfel.leaf_voxel_size",
-                                                                                  voxel_resolution_));
+        const float surfel_leaf_voxel_size = static_cast<float>(voxel_resolution_);
         const float surfel_map_half_extent = static_cast<float>(local_map_box_size_ * 0.5);
         const float surfel_recenter_distance = static_cast<float>(parameter<double>(private_node,
                                                                                     "surfel.recenter_distance",
@@ -654,8 +654,6 @@ public:
                  surfel_leaf_voxel_size,
                  surfel_minimum_occupied_leaf_count);
 
-        lio_path_.header.stamp = ros::Time::now();
-        lio_path_.header.frame_id = odometry_frame_;
         voxel_grid_.setLeafSize(voxel_resolution_, voxel_resolution_, voxel_resolution_);
         points_preprocessor_->lidar_type_ = lidar_type_;
 

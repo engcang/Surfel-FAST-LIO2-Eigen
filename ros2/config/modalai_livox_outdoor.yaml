@@ -43,7 +43,6 @@ laser_mapping:
         #false selects the lower-CPU dense voxel map; true selects the concurrent hash map.
         surfel:
             use_concurrent_hash_map: false
-            leaf_voxel_size: 0.5
             maximum_flatness: 0.03
             minimum_linearity: 0.3
             minimum_occupied_leaf_count: 5
