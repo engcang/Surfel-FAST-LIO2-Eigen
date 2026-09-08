@@ -194,17 +194,15 @@ inline void TbbSurfelVoxelMap::update(const pcl::PointCloud<pcl::PointXYZINormal
 #if TBB_VERSION_MAJOR >= 2021
     concurrent_dirty_parents_.reserve(_points.size() / 4U + 1U);
 #endif
-    //clang-format off
     tbb::parallel_for(tbb::blocked_range<std::size_t>(0U, _points.size()),
                       [this, &_points](const tbb::blocked_range<std::size_t> &_range)
-                      {
-                          for (std::size_t index = _range.begin(); index != _range.end(); ++index)
-                          {
-                              const pcl::PointXYZINormal &point = _points[index];
-                              insertPointConcurrent(Eigen::Vector3f(point.x, point.y, point.z));
-                          }
-                      });
-    //clang-format on
+    {
+        for (std::size_t index = _range.begin(); index != _range.end(); ++index)
+        {
+            const pcl::PointXYZINormal &point = _points[index];
+            insertPointConcurrent(Eigen::Vector3f(point.x, point.y, point.z));
+        }
+    });
     for (const VoxelKey &parent_key : concurrent_dirty_parents_)
     {
         parents_.try_emplace(parent_key);
@@ -314,16 +312,14 @@ inline void TbbSurfelVoxelMap::recomputeDirtySurfels()
         }
     }
 
-    //clang-format off
     tbb::parallel_for(tbb::blocked_range<std::size_t>(0U, dirty_nodes_.size()),
                       [this](const tbb::blocked_range<std::size_t> &_range)
-                      {
-                          for (std::size_t index = _range.begin(); index != _range.end(); ++index)
-                          {
-                              recomputeSurfel(dirty_nodes_[index].first, *dirty_nodes_[index].second);
-                          }
-                      });
-    //clang-format on
+    {
+        for (std::size_t index = _range.begin(); index != _range.end(); ++index)
+        {
+            recomputeSurfel(dirty_nodes_[index].first, *dirty_nodes_[index].second);
+        }
+    });
 
     std::size_t currently_valid = 0U;
     for (const auto &entry : dirty_nodes_)

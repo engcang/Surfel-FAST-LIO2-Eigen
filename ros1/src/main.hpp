@@ -341,16 +341,14 @@ private:
     {
         auto &surfel_map = activeSurfelMap<UseConcurrentHashMap>();
         points_voxel_world_->resize(num_voxel_points_);
-        //clang-format off
         tbb::parallel_for(tbb::blocked_range<int>(0, num_voxel_points_),
                           [this](const tbb::blocked_range<int> &_range)
-                          {
-                              for (int index = _range.begin(); index != _range.end(); ++index)
-                              {
-                                  pointLidarToWorld(&points_voxel_lidar_->points[index], &points_voxel_world_->points[index]);
-                              }
-                          });
-        //clang-format on
+        {
+            for (int index = _range.begin(); index != _range.end(); ++index)
+            {
+                pointLidarToWorld(&points_voxel_lidar_->points[index], &points_voxel_world_->points[index]);
+            }
+        });
 
         surfel_map.update(*points_voxel_world_, esikf_state_.position_);
     }
@@ -475,49 +473,47 @@ private:
         point_normal_vectors_effective_->clear();
 
         //Use direct O(1) surfel lookup for residual computation.
-        //clang-format off
         tbb::parallel_for(tbb::blocked_range<int>(0, num_voxel_points_),
                           [this, &_s, &surfel_map, &lidar_to_imu_translation, &lidar_to_imu_rotation](const tbb::blocked_range<int> &_range)
-                          {
-                              for (int index = _range.begin(); index != _range.end(); ++index)
-                              {
-                                  const LidarPoint &point_body = points_voxel_lidar_->points[index];
-                                  LidarPoint &point_world = points_voxel_world_->points[index];
-                                  const Eigen::Vector3d point_lidar(point_body.x, point_body.y, point_body.z);
-                                  const Eigen::Vector3d point_global = _s.rotation_ *
-                                                                           (lidar_to_imu_rotation * point_lidar + lidar_to_imu_translation) +
-                                                                       _s.position_;
-                                  point_world.x = point_global.x();
-                                  point_world.y = point_global.y();
-                                  point_world.z = point_global.z();
-                                  point_world.intensity = point_body.intensity;
-                                  point_has_valid_surfel_[index] = false;
+        {
+            for (int index = _range.begin(); index != _range.end(); ++index)
+            {
+                const LidarPoint &point_body = points_voxel_lidar_->points[index];
+                LidarPoint &point_world = points_voxel_world_->points[index];
+                const Eigen::Vector3d point_lidar(point_body.x, point_body.y, point_body.z);
+                const Eigen::Vector3d point_global = _s.rotation_ *
+                                                         (lidar_to_imu_rotation * point_lidar + lidar_to_imu_translation) +
+                                                     _s.position_;
+                point_world.x = point_global.x();
+                point_world.y = point_global.y();
+                point_world.z = point_global.z();
+                point_world.intensity = point_body.intensity;
+                point_has_valid_surfel_[index] = false;
 
-                                  using SurfelType = std::conditional_t<UseConcurrentHashMap,
-                                                                        TbbSurfel,
-                                                                        Surfel>;
-                                  SurfelType surfel;
-                                  if (!surfel_map.findSurfel(point_global, surfel))
-                                  {
-                                      continue;
-                                  }
+                using SurfelType = std::conditional_t<UseConcurrentHashMap,
+                                                      TbbSurfel,
+                                                      Surfel>;
+                SurfelType surfel;
+                if (!surfel_map.findSurfel(point_global, surfel))
+                {
+                    continue;
+                }
 
-                                  const float distance = surfel.normal_.dot(point_global.cast<float>() - surfel.centroid_);
-                                  const float range_scale = std::sqrt(std::max(static_cast<float>(point_lidar.norm()), 1.0e-6F));
-                                  const float score = 1.0F - 0.9F * std::abs(distance) / range_scale;
-                                  if (score <= 0.9F)
-                                  {
-                                      continue;
-                                  }
+                const float distance = surfel.normal_.dot(point_global.cast<float>() - surfel.centroid_);
+                const float range_scale = std::sqrt(std::max(static_cast<float>(point_lidar.norm()), 1.0e-6F));
+                const float score = 1.0F - 0.9F * std::abs(distance) / range_scale;
+                if (score <= 0.9F)
+                {
+                    continue;
+                }
 
-                                  point_has_valid_surfel_[index] = true;
-                                  point_normal_vectors_->points[index].x = surfel.normal_.x();
-                                  point_normal_vectors_->points[index].y = surfel.normal_.y();
-                                  point_normal_vectors_->points[index].z = surfel.normal_.z();
-                                  point_normal_vectors_->points[index].intensity = distance;
-                              }
-                          });
-        //clang-format on
+                point_has_valid_surfel_[index] = true;
+                point_normal_vectors_->points[index].x = surfel.normal_.x();
+                point_normal_vectors_->points[index].y = surfel.normal_.y();
+                point_normal_vectors_->points[index].z = surfel.normal_.z();
+                point_normal_vectors_->points[index].intensity = distance;
+            }
+        });
 
         num_effective_points_ = 0;
 
@@ -542,26 +538,24 @@ private:
         _measurement_data.jacobian_.setZero(num_effective_points_, kMeasurementStateDim);
         _measurement_data.residual_.resize(num_effective_points_);
 
-        //clang-format off
         tbb::parallel_for(tbb::blocked_range<int>(0, num_effective_points_),
                           [this, &_s, &_measurement_data, &lidar_to_imu_translation, &lidar_to_imu_rotation](const tbb::blocked_range<int> &_range)
-                          {
-                              for (int index = _range.begin(); index != _range.end(); ++index)
-                              {
-                                  const LidarPoint &laser_point = points_voxel_lidar_effective_->points[index];
-                                  const Eigen::Vector3d point_lidar(laser_point.x, laser_point.y, laser_point.z);
-                                  const Eigen::Vector3d point_imu = lidar_to_imu_rotation * point_lidar + lidar_to_imu_translation;
-                                  const Eigen::Matrix3d point_imu_cross = lie::hat(point_imu);
+        {
+            for (int index = _range.begin(); index != _range.end(); ++index)
+            {
+                const LidarPoint &laser_point = points_voxel_lidar_effective_->points[index];
+                const Eigen::Vector3d point_lidar(laser_point.x, laser_point.y, laser_point.z);
+                const Eigen::Vector3d point_imu = lidar_to_imu_rotation * point_lidar + lidar_to_imu_translation;
+                const Eigen::Matrix3d point_imu_cross = lie::hat(point_imu);
 
-                                  const LidarPoint &normal_point = point_normal_vectors_effective_->points[index];
-                                  const Eigen::Vector3d normal(normal_point.x, normal_point.y, normal_point.z);
-                                  const Eigen::Vector3d rotated_normal = _s.rotation_.conjugate() * normal;
-                                  const Eigen::Vector3d rotation_jacobian = point_imu_cross * rotated_normal;
-                                  _measurement_data.jacobian_.block<1, kMeasurementStateDim>(index, 0) << normal.transpose(), rotation_jacobian.transpose();
-                                  _measurement_data.residual_(index) = -normal_point.intensity;
-                              }
-                          });
-        //clang-format on
+                const LidarPoint &normal_point = point_normal_vectors_effective_->points[index];
+                const Eigen::Vector3d normal(normal_point.x, normal_point.y, normal_point.z);
+                const Eigen::Vector3d rotated_normal = _s.rotation_.conjugate() * normal;
+                const Eigen::Vector3d rotation_jacobian = point_imu_cross * rotated_normal;
+                _measurement_data.jacobian_.block<1, kMeasurementStateDim>(index, 0) << normal.transpose(), rotation_jacobian.transpose();
+                _measurement_data.residual_(index) = -normal_point.intensity;
+            }
+        });
     }
 
 public:

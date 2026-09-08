@@ -278,16 +278,14 @@ inline void SurfelVoxelMap::recomputeDirtySurfels()
         }
     }
 
-    //clang-format off
     tbb::parallel_for(tbb::blocked_range<std::size_t>(0U, dirty_nodes_.size()),
                       [this](const tbb::blocked_range<std::size_t> &_range)
-                      {
-                          for (std::size_t index = _range.begin(); index != _range.end(); ++index)
-                          {
-                              recomputeSurfel(dirty_nodes_[index].first, *dirty_nodes_[index].second);
-                          }
-                      });
-    //clang-format on
+    {
+        for (std::size_t index = _range.begin(); index != _range.end(); ++index)
+        {
+            recomputeSurfel(dirty_nodes_[index].first, *dirty_nodes_[index].second);
+        }
+    });
 
     std::size_t currently_valid = 0U;
     for (const auto &entry : dirty_nodes_)
